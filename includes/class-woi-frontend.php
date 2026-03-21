@@ -8,6 +8,16 @@ class WOI_Frontend {
 	public function init() {
 		add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 		add_action( 'woocommerce_before_add_to_cart_button', array( $this, 'render_placeholder' ), 15 );
+		add_filter( 'woocommerce_product_single_add_to_cart_text', array( $this, 'filter_add_to_cart_text' ) );
+	}
+
+	public function filter_add_to_cart_text( $text ) {
+		$cart_key = isset( $_REQUEST['update_cart'] ) ? wc_clean( wp_unslash( $_REQUEST['update_cart'] ) ) : '';
+		if ( '' === $cart_key ) {
+			return $text;
+		}
+
+		return __( 'Update Cart', 'woo-order-images' );
 	}
 
 	public function enqueue_assets() {
@@ -60,9 +70,33 @@ class WOI_Frontend {
 
 		$required = (int) get_post_meta( $product->get_id(), WOI_Admin_Product_Settings::META_REQUIRED_COUNT, true );
 		$required = max( 1, $required );
-		$spec     = WOI_Admin_Product_Settings::get_product_spec( $product->get_id() );
-		$left_pct = ( 100 - $spec['visible_width_percent'] ) / 2;
-		$top_pct  = ( 100 - $spec['visible_height_percent'] ) / 2;
+		$spec           = WOI_Admin_Product_Settings::get_product_spec( $product->get_id() );
+		$update_cart_key = isset( $_REQUEST['update_cart'] ) ? wc_clean( wp_unslash( $_REQUEST['update_cart'] ) ) : '';
+		$is_update      = '' !== $update_cart_key;
+		$existing_images = array();
+		$existing_qty    = 0;
+
+		if ( $is_update && function_exists( 'WC' ) && WC()->cart ) {
+			$cart = WC()->cart->get_cart();
+			if ( isset( $cart[ $update_cart_key ] ) && is_array( $cart[ $update_cart_key ] ) ) {
+				$cart_item = $cart[ $update_cart_key ];
+				$item_product_id = isset( $cart_item['product_id'] ) ? (int) $cart_item['product_id'] : 0;
+				$item_variation_id = isset( $cart_item['variation_id'] ) ? (int) $cart_item['variation_id'] : 0;
+
+				if ( $product->get_id() === $item_product_id || $product->get_id() === $item_variation_id ) {
+					$existing_qty = isset( $cart_item['quantity'] ) ? max( 1, (int) $cart_item['quantity'] ) : 0;
+					if ( ! empty( $cart_item[ WOI_Order_Images::CART_KEY ] ) && is_array( $cart_item[ WOI_Order_Images::CART_KEY ] ) ) {
+						foreach ( $cart_item[ WOI_Order_Images::CART_KEY ] as $image ) {
+							if ( is_array( $image ) && ! empty( $image['url'] ) ) {
+								$existing_images[] = esc_url_raw( $image['url'] );
+							} elseif ( is_string( $image ) && '' !== $image ) {
+								$existing_images[] = esc_url_raw( $image );
+							}
+						}
+					}
+				}
+			}
+		}
 		?>
 		<div
 			class="woi-product-note"
@@ -71,23 +105,37 @@ class WOI_Frontend {
 			data-woi-visible-aspect-ratio="<?php echo esc_attr( $spec['visible_aspect_ratio'] ); ?>"
 			data-woi-visible-width-percent="<?php echo esc_attr( $spec['visible_width_percent'] ); ?>"
 			data-woi-visible-height-percent="<?php echo esc_attr( $spec['visible_height_percent'] ); ?>"
+			data-woi-existing-images="<?php echo esc_attr( wp_json_encode( array_values( $existing_images ) ) ); ?>"
+			data-woi-existing-qty="<?php echo esc_attr( $existing_qty ); ?>"
 		>
+			<?php if ( $is_update ) : ?>
+				<input type="hidden" name="update_cart" value="<?php echo esc_attr( $update_cart_key ); ?>">
+			<?php endif; ?>
 			<p><strong><?php esc_html_e( 'Image Uploads Required', 'woo-order-images' ); ?></strong></p>
 			<p class="woi-requirement-text">
 				<?php
-				echo esc_html(
-					sprintf(
-						__( 'This product requires %d image(s) per quantity ordered. Upload and crop each image before adding to cart.', 'woo-order-images' ),
-						$required
-					)
-				);
+				if ( $is_update ) {
+					echo esc_html(
+						sprintf(
+							__( 'This product requires %d image(s) per quantity ordered. Upload and crop each image, then click Update Cart.', 'woo-order-images' ),
+							$required
+						)
+					);
+				} else {
+					echo esc_html(
+						sprintf(
+							__( 'This product requires %d image(s) per quantity ordered. Upload and crop each image before adding to cart.', 'woo-order-images' ),
+							$required
+						)
+					);
+				}
 				?>
 			</p>
 			<p class="woi-spec-text">
 				<?php
 				echo esc_html(
 					sprintf(
-						__( 'Visible area: %1$s" × %2$s". Wrap area: %3$s" on each side. Non-square images auto-match portrait/landscape; use Swap Orientation while cropping to override.', 'woo-order-images' ),
+						__( 'Visible area: %1$s" × %2$s". Bleed area: %3$s" on each side. Non-square images auto-match portrait/landscape; use Swap Orientation while cropping to override.', 'woo-order-images' ),
 						$spec['visible_width'],
 						$spec['visible_height'],
 						$spec['wrap_margin']
@@ -121,16 +169,15 @@ class WOI_Frontend {
 			<div class="woi-modal-content" role="dialog" aria-modal="true" aria-label="<?php esc_attr_e( 'Crop image', 'woo-order-images' ); ?>">
 				<div class="woi-cropper-wrap">
 					<img data-woi-cropper-image alt="">
-					<div
-						class="woi-visible-area-guide"
-						style="left:<?php echo esc_attr( $left_pct ); ?>%;top:<?php echo esc_attr( $top_pct ); ?>%;width:<?php echo esc_attr( $spec['visible_width_percent'] ); ?>%;height:<?php echo esc_attr( $spec['visible_height_percent'] ); ?>%;"
-					>
-						<span><?php esc_html_e( 'Visible area', 'woo-order-images' ); ?></span>
-					</div>
-					<div class="woi-print-area-guide"><span><?php esc_html_e( 'Print area with wrap', 'woo-order-images' ); ?></span></div>
+				</div>
+				<div class="woi-zoom-row">
+					<span class="woi-zoom-label"><?php esc_html_e( 'Zoom', 'woo-order-images' ); ?></span>
+					<input type="range" class="woi-zoom-slider" data-woi-zoom-slider min="0" max="100" value="50" step="1" aria-label="<?php esc_attr_e( 'Zoom', 'woo-order-images' ); ?>">
+					<span class="woi-zoom-value" data-woi-zoom-value>100%</span>
 				</div>
 				<div class="woi-modal-actions">
 					<button type="button" class="button" data-woi-swap-orientation><?php esc_html_e( 'Swap Orientation', 'woo-order-images' ); ?></button>
+					<button type="button" class="button" data-woi-rotate><?php esc_html_e( 'Rotate Image', 'woo-order-images' ); ?></button>
 					<button type="button" class="button" data-woi-close><?php esc_html_e( 'Cancel', 'woo-order-images' ); ?></button>
 					<button type="button" class="button button-primary" data-woi-save-crop><?php esc_html_e( 'Save Crop', 'woo-order-images' ); ?></button>
 				</div>

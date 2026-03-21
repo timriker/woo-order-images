@@ -112,11 +112,13 @@ class WOI_Admin_Order_Images {
 			body{font-family:Arial,sans-serif;color:#111;padding:0.2in;}
 			.woi-sheet-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0.12in;align-items:start;}
 			.woi-tile{position:relative;}
-			.woi-bleed{position:relative;overflow:hidden;background:#fff;border:0.6pt dashed #000;}
+			.woi-bleed{position:relative;overflow:hidden;background:#fff;}
 			.woi-bleed img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
-			.woi-visible-cut{position:absolute;border:0.7pt solid #000;pointer-events:none;z-index:3;}
+			.woi-cut-outline{position:absolute;inset:0;pointer-events:none;z-index:4;}
+			.woi-cut-outline svg{display:block;width:100%;height:100%;}
 			.woi-watermark-band{position:absolute;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:2;overflow:hidden;}
-			.woi-watermark-band span{font-size:7.5pt;line-height:1.1;color:rgba(0,0,0,0.35);white-space:nowrap;letter-spacing:0.02em;}
+			.woi-watermark-band span{font-size:7.5pt;line-height:1.1;color:rgba(0,0,0,0.65);white-space:nowrap;letter-spacing:0.02em;background:rgba(255,255,255,0.88);padding:2px 8px;border-radius:2px;}
+			.woi-watermark-top span{transform:rotate(180deg);}
 			.woi-watermark-left span,.woi-watermark-right span{transform:rotate(-90deg);}
 			@page{margin:0;}
 			@media print{html,body{margin:0;padding:0;background:#fff;}body{padding:0.12in;} .woi-sheet-grid{gap:0.1in;}}
@@ -130,20 +132,22 @@ class WOI_Admin_Order_Images {
 			$top_pct      = ( 100 - $spec['visible_height_percent'] ) / 2;
 			$right_pct    = $left_pct;
 			$bottom_pct   = $top_pct;
+			$clip_polygon = $this->get_cut_polygon_css( $left_pct, $top_pct );
+			$cut_outline  = $this->get_cut_polygon_svg( $left_pct, $top_pct );
 
 			echo '<div class="woi-tile">';
-			echo '<div class="woi-bleed" style="aspect-ratio:' . esc_attr( $spec['full_width'] ) . ' / ' . esc_attr( $spec['full_height'] ) . ';">';
+			echo '<div class="woi-bleed" style="aspect-ratio:' . esc_attr( $spec['full_width'] ) . ' / ' . esc_attr( $spec['full_height'] ) . ';clip-path:polygon(' . esc_attr( $clip_polygon ) . ');">';
 			echo '<img src="' . esc_url( $url ) . '" alt="">';
-			echo '<div class="woi-visible-cut" style="left:' . esc_attr( $left_pct ) . '%;top:' . esc_attr( $top_pct ) . '%;right:' . esc_attr( $right_pct ) . '%;bottom:' . esc_attr( $bottom_pct ) . '%;"></div>';
 
 			if ( '' !== trim( $watermark_text ) ) {
-				echo '<div class="woi-watermark-band" style="left:0;top:0;width:100%;height:' . esc_attr( $top_pct ) . '%;"><span>' . esc_html( $watermark_text ) . '</span></div>';
+				echo '<div class="woi-watermark-band woi-watermark-top" style="left:0;top:0;width:100%;height:' . esc_attr( $top_pct ) . '%;"><span>' . esc_html( $watermark_text ) . '</span></div>';
 				echo '<div class="woi-watermark-band" style="left:0;bottom:0;width:100%;height:' . esc_attr( $bottom_pct ) . '%;"><span>' . esc_html( $watermark_text ) . '</span></div>';
 				echo '<div class="woi-watermark-band woi-watermark-left" style="left:0;top:' . esc_attr( $top_pct ) . '%;width:' . esc_attr( $left_pct ) . '%;height:' . esc_attr( $spec['visible_height_percent'] ) . '%;"><span>' . esc_html( $watermark_text ) . '</span></div>';
 				echo '<div class="woi-watermark-band woi-watermark-right" style="right:0;top:' . esc_attr( $top_pct ) . '%;width:' . esc_attr( $right_pct ) . '%;height:' . esc_attr( $spec['visible_height_percent'] ) . '%;"><span>' . esc_html( $watermark_text ) . '</span></div>';
 			}
 
 			echo '</div>';
+			echo '<div class="woi-cut-outline"><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polygon points="' . esc_attr( $cut_outline ) . '" fill="none" stroke="#000" stroke-width="0.7" vector-effect="non-scaling-stroke" /></svg></div>';
 			echo '</div>';
 		}
 
@@ -207,6 +211,52 @@ class WOI_Admin_Order_Images {
 		$relative = ltrim( substr( $url, strlen( $baseurl ) ), '/' );
 
 		return $basedir . str_replace( array( '../', '..\\' ), '', $relative );
+	}
+
+	private function get_cut_polygon_css( $left_pct, $top_pct ) {
+		$right_pct  = 100 - $left_pct;
+		$bottom_pct = 100 - $top_pct;
+
+		return implode(
+			', ',
+			array(
+				$this->format_pct( $left_pct ) . ' 0%',
+				$this->format_pct( $right_pct ) . ' 0%',
+				'100% ' . $this->format_pct( $top_pct ),
+				'100% ' . $this->format_pct( $bottom_pct ),
+				$this->format_pct( $right_pct ) . ' 100%',
+				$this->format_pct( $left_pct ) . ' 100%',
+				'0% ' . $this->format_pct( $bottom_pct ),
+				'0% ' . $this->format_pct( $top_pct ),
+			)
+		);
+	}
+
+	private function get_cut_polygon_svg( $left_pct, $top_pct ) {
+		$right_pct  = 100 - $left_pct;
+		$bottom_pct = 100 - $top_pct;
+
+		return implode(
+			' ',
+			array(
+				$this->format_num( $left_pct ) . ',0',
+				$this->format_num( $right_pct ) . ',0',
+				'100,' . $this->format_num( $top_pct ),
+				'100,' . $this->format_num( $bottom_pct ),
+				$this->format_num( $right_pct ) . ',100',
+				$this->format_num( $left_pct ) . ',100',
+				'0,' . $this->format_num( $bottom_pct ),
+				'0,' . $this->format_num( $top_pct ),
+			)
+		);
+	}
+
+	private function format_pct( $value ) {
+		return rtrim( rtrim( number_format( (float) $value, 3, '.', '' ), '0' ), '.' ) . '%';
+	}
+
+	private function format_num( $value ) {
+		return rtrim( rtrim( number_format( (float) $value, 3, '.', '' ), '0' ), '.' );
 	}
 
 	private function get_item_spec( $item ) {

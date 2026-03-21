@@ -19,6 +19,8 @@ class WOI_Order_Images {
 	public function init() {
 		add_filter( 'woocommerce_add_to_cart_validation', array( $this, 'validate_required_images' ), 10, 5 );
 		add_filter( 'woocommerce_add_cart_item_data', array( $this, 'add_cart_item_data' ), 10, 4 );
+		add_action( 'woocommerce_add_to_cart', array( $this, 'replace_updated_cart_item' ), 10, 6 );
+		add_filter( 'woocommerce_add_to_cart_message_html', array( $this, 'filter_add_to_cart_message_html' ), 10, 2 );
 		add_filter( 'woocommerce_get_item_data', array( $this, 'render_cart_item_data' ), 10, 2 );
 		add_filter( 'woocommerce_cart_item_name', array( $this, 'render_cart_item_name' ), 10, 3 );
 		add_filter( 'woocommerce_hidden_order_itemmeta', array( $this, 'hide_order_item_meta' ), 10, 1 );
@@ -26,44 +28,32 @@ class WOI_Order_Images {
 		add_action( 'woocommerce_checkout_create_order_line_item', array( $this, 'add_order_item_meta' ), 10, 4 );
 	}
 
+	public function filter_add_to_cart_message_html( $message, $products ) {
+		$update_cart_key = isset( $_REQUEST['update_cart'] ) ? wc_clean( wp_unslash( $_REQUEST['update_cart'] ) ) : '';
+		if ( '' === $update_cart_key ) {
+			return $message;
+		}
+
+		return esc_html__( 'Item images have been updated in your cart.', 'woo-order-images' );
+	}
+
+	public function replace_updated_cart_item( $new_cart_item_key, $product_id, $quantity, $variation_id, $variation, $cart_item_data ) {
+		$update_cart_key = isset( $_REQUEST['update_cart'] ) ? wc_clean( wp_unslash( $_REQUEST['update_cart'] ) ) : '';
+		if ( '' === $update_cart_key || ! function_exists( 'WC' ) || ! WC()->cart ) {
+			return;
+		}
+
+		$cart = WC()->cart->get_cart();
+		if ( ! isset( $cart[ $update_cart_key ] ) ) {
+			return;
+		}
+
+		if ( $update_cart_key !== $new_cart_item_key ) {
+			WC()->cart->remove_cart_item( $update_cart_key );
+		}
+	}
+
 	public function validate_required_images( $passed, $product_id, $quantity, $variation_id = 0, $variations = array() ) {
-		$product_id_for_meta = $variation_id ? $variation_id : $product_id;
-		$enabled             = get_post_meta( $product_id_for_meta, WOI_Admin_Product_Settings::META_ENABLED, true );
-
-		if ( 'yes' !== $enabled ) {
-			return $passed;
-		}
-
-		$base_required = (int) get_post_meta( $product_id_for_meta, WOI_Admin_Product_Settings::META_REQUIRED_COUNT, true );
-		$base_required = max( 1, $base_required );
-		$qty           = max( 1, (int) $quantity );
-		$required      = $base_required * $qty;
-
-		$images = $this->get_posted_images();
-		if ( count( $images ) !== $required ) {
-			wc_add_notice(
-				sprintf(
-					__( 'Please provide exactly %d image(s) for this product before adding it to cart.', 'woo-order-images' ),
-					$required
-				),
-				'error'
-			);
-			return false;
-		}
-
-		foreach ( $images as $index => $image_data ) {
-			if ( ! $this->is_valid_data_url( $image_data ) ) {
-				wc_add_notice(
-					sprintf(
-						__( 'Image %d is missing or invalid. Please crop and save each image before adding to cart.', 'woo-order-images' ),
-						$index + 1
-					),
-					'error'
-				);
-				return false;
-			}
-		}
-
 		return $passed;
 	}
 
@@ -81,10 +71,20 @@ class WOI_Order_Images {
 		}
 
 		$saved = array();
-		foreach ( $images as $data_url ) {
-			$file = $this->save_data_url_image( $data_url );
-			if ( ! empty( $file['url'] ) && ! empty( $file['path'] ) ) {
-				$saved[] = $file;
+		foreach ( $images as $image_value ) {
+			if ( $this->is_valid_data_url( $image_value ) ) {
+				$file = $this->save_data_url_image( $image_value );
+				if ( ! empty( $file['url'] ) ) {
+					$saved[] = $file;
+				}
+				continue;
+			}
+
+			if ( $this->is_valid_existing_upload_url( $image_value ) ) {
+				$saved[] = array(
+					'url'  => esc_url_raw( $image_value ),
+					'path' => $this->url_to_upload_path( $image_value ),
+				);
 			}
 		}
 
@@ -102,27 +102,100 @@ class WOI_Order_Images {
 	}
 
 	public function render_cart_item_data( $item_data, $cart_item ) {
-		if ( empty( $cart_item[ self::CART_KEY ] ) || ! is_array( $cart_item[ self::CART_KEY ] ) ) {
+		$product_id = isset( $cart_item['variation_id'] ) && $cart_item['variation_id'] ? $cart_item['variation_id'] : ( isset( $cart_item['product_id'] ) ? $cart_item['product_id'] : 0 );
+		$enabled    = get_post_meta( $product_id, WOI_Admin_Product_Settings::META_ENABLED, true );
+		if ( 'yes' !== $enabled && ! empty( $cart_item['product_id'] ) && (int) $cart_item['product_id'] !== (int) $product_id ) {
+			$product_id = (int) $cart_item['product_id'];
+			$enabled    = get_post_meta( $product_id, WOI_Admin_Product_Settings::META_ENABLED, true );
+		}
+		if ( 'yes' !== $enabled ) {
 			return $item_data;
 		}
 
+		$qty              = isset( $cart_item['quantity'] ) ? max( 1, (int) $cart_item['quantity'] ) : 1;
+		$required_per_qty = isset( $cart_item[ self::CART_REQUIRED_PER_QTY_KEY ] ) ? (int) $cart_item[ self::CART_REQUIRED_PER_QTY_KEY ] : (int) get_post_meta( $product_id, WOI_Admin_Product_Settings::META_REQUIRED_COUNT, true );
+		$required_per_qty = max( 1, $required_per_qty );
+		$required_total   = $required_per_qty * $qty;
+		$current          = ( ! empty( $cart_item[ self::CART_KEY ] ) && is_array( $cart_item[ self::CART_KEY ] ) ) ? count( $cart_item[ self::CART_KEY ] ) : 0;
+		$complete         = $current >= $required_total;
+
+		$label = $complete
+			? sprintf( __( '%1$d of %2$d images ✓', 'woo-order-images' ), $current, $required_total )
+			: sprintf( __( '%1$d of %2$d images', 'woo-order-images' ), $current, $required_total );
+
 		$item_data[] = array(
-			'name'  => __( 'Uploaded images', 'woo-order-images' ),
-			'value' => (string) count( $cart_item[ self::CART_KEY ] ),
+			'name'  => '',
+			'value' => $label,
 		);
+
+		$product_url = get_permalink( $product_id );
+		$cart_key    = isset( $cart_item['key'] ) ? (string) $cart_item['key'] : '';
+		$edit_url    = ( $product_url && '' !== $cart_key ) ? add_query_arg( 'update_cart', rawurlencode( $cart_key ), $product_url ) : '';
+		if ( $edit_url ) {
+			$edit_label = $complete ? __( 'Edit Images', 'woo-order-images' ) : __( 'Edit Images (Required)', 'woo-order-images' );
+			$edit_value = $complete
+				? '<a href="' . esc_url( $edit_url ) . '">' . esc_html( $edit_label ) . '</a>'
+				: '<a href="' . esc_url( $edit_url ) . '"><strong>' . esc_html( $edit_label ) . '</strong></a>';
+			$item_data[] = array(
+				'name'  => '',
+				'value' => $edit_value,
+			);
+		}
 
 		return $item_data;
 	}
 
 	public function render_cart_item_name( $product_name, $cart_item, $cart_item_key ) {
-		if ( empty( $cart_item[ self::CART_KEY ] ) || ! is_array( $cart_item[ self::CART_KEY ] ) ) {
+		$product_id = isset( $cart_item['variation_id'] ) && $cart_item['variation_id'] ? $cart_item['variation_id'] : ( isset( $cart_item['product_id'] ) ? $cart_item['product_id'] : 0 );
+		$enabled    = get_post_meta( $product_id, WOI_Admin_Product_Settings::META_ENABLED, true );
+		if ( 'yes' !== $enabled && ! empty( $cart_item['product_id'] ) && (int) $cart_item['product_id'] !== (int) $product_id ) {
+			$product_id = (int) $cart_item['product_id'];
+			$enabled    = get_post_meta( $product_id, WOI_Admin_Product_Settings::META_ENABLED, true );
+		}
+		if ( 'yes' !== $enabled ) {
 			return $product_name;
 		}
 
-		$visible_width  = isset( $cart_item[ self::CART_VISIBLE_WIDTH_KEY ] ) ? (float) $cart_item[ self::CART_VISIBLE_WIDTH_KEY ] : 1;
-		$visible_height = isset( $cart_item[ self::CART_VISIBLE_HEIGHT_KEY ] ) ? (float) $cart_item[ self::CART_VISIBLE_HEIGHT_KEY ] : 1;
+		$qty              = isset( $cart_item['quantity'] ) ? max( 1, (int) $cart_item['quantity'] ) : 1;
+		$required_per_qty = isset( $cart_item[ self::CART_REQUIRED_PER_QTY_KEY ] ) ? (int) $cart_item[ self::CART_REQUIRED_PER_QTY_KEY ] : (int) get_post_meta( $product_id, WOI_Admin_Product_Settings::META_REQUIRED_COUNT, true );
+		$required_per_qty = max( 1, $required_per_qty );
+		$required_total   = $required_per_qty * $qty;
+		$images           = ( ! empty( $cart_item[ self::CART_KEY ] ) && is_array( $cart_item[ self::CART_KEY ] ) ) ? $cart_item[ self::CART_KEY ] : array();
+		$current          = count( $images );
+		$complete         = $current >= $required_total;
 
-		return $product_name . $this->get_thumbnail_markup( $cart_item[ self::CART_KEY ], $visible_width, $visible_height, 56 );
+		$badge_style = $complete
+			? 'display:inline-block;margin-left:6px;padding:2px 8px;border-radius:3px;font-size:0.8em;font-weight:600;background:#d4edda;color:#155724;'
+			: 'display:inline-block;margin-left:6px;padding:2px 8px;border-radius:3px;font-size:0.8em;font-weight:600;background:#fff3cd;color:#856404;';
+
+		$badge = '<span style="' . esc_attr( $badge_style ) . '">';
+		$badge .= $complete
+			? esc_html( sprintf( __( '%1$d/%2$d images ✓', 'woo-order-images' ), $current, $required_total ) )
+			: esc_html( sprintf( __( '%1$d/%2$d images needed', 'woo-order-images' ), $current, $required_total ) );
+		$badge .= '</span>';
+
+		// Build the edit-images URL: product page with ?update_cart=KEY
+		$parent_product_id = isset( $cart_item['product_id'] ) ? (int) $cart_item['product_id'] : $product_id;
+		$product_url       = get_permalink( $parent_product_id );
+		$edit_url          = $product_url ? add_query_arg( 'update_cart', rawurlencode( $cart_item_key ), $product_url ) : '';
+
+		$suffix = $product_name . $badge;
+
+		if ( $edit_url ) {
+			$link_style = $complete
+				? 'display:inline-block;margin-left:8px;font-size:0.8em;'
+				: 'display:inline-block;margin-left:8px;font-size:0.8em;font-weight:600;';
+			$link_text = $complete ? __( 'Edit Images', 'woo-order-images' ) : __( 'Edit Images (Required)', 'woo-order-images' );
+			$suffix   .= ' <a href="' . esc_url( $edit_url ) . '" style="' . esc_attr( $link_style ) . '">' . esc_html( $link_text ) . '</a>';
+		}
+
+		if ( ! empty( $images ) ) {
+			$visible_width  = isset( $cart_item[ self::CART_VISIBLE_WIDTH_KEY ] ) ? (float) $cart_item[ self::CART_VISIBLE_WIDTH_KEY ] : 1;
+			$visible_height = isset( $cart_item[ self::CART_VISIBLE_HEIGHT_KEY ] ) ? (float) $cart_item[ self::CART_VISIBLE_HEIGHT_KEY ] : 1;
+			$suffix        .= $this->get_thumbnail_markup( $images, $visible_width, $visible_height, 56 );
+		}
+
+		return $suffix;
 	}
 
 	public function hide_order_item_meta( $hidden_keys ) {
@@ -139,35 +212,57 @@ class WOI_Order_Images {
 			return;
 		}
 
+		$missing_items = array();
+
 		foreach ( WC()->cart->get_cart() as $cart_item ) {
 			if ( empty( $cart_item['data'] ) || ! $cart_item['data'] instanceof WC_Product ) {
 				continue;
 			}
 
 			$product = $cart_item['data'];
-			$enabled = get_post_meta( $product->get_id(), WOI_Admin_Product_Settings::META_ENABLED, true );
+			$product_id = $product->get_id();
+			$enabled    = get_post_meta( $product_id, WOI_Admin_Product_Settings::META_ENABLED, true );
+			if ( 'yes' !== $enabled && ! empty( $cart_item['product_id'] ) && (int) $cart_item['product_id'] !== (int) $product_id ) {
+				$product_id = (int) $cart_item['product_id'];
+				$enabled    = get_post_meta( $product_id, WOI_Admin_Product_Settings::META_ENABLED, true );
+			}
 			if ( 'yes' !== $enabled ) {
 				continue;
 			}
 
-			$required_per_qty = isset( $cart_item[ self::CART_REQUIRED_PER_QTY_KEY ] ) ? (int) $cart_item[ self::CART_REQUIRED_PER_QTY_KEY ] : (int) get_post_meta( $product->get_id(), WOI_Admin_Product_Settings::META_REQUIRED_COUNT, true );
+			$required_per_qty = isset( $cart_item[ self::CART_REQUIRED_PER_QTY_KEY ] ) ? (int) $cart_item[ self::CART_REQUIRED_PER_QTY_KEY ] : (int) get_post_meta( $product_id, WOI_Admin_Product_Settings::META_REQUIRED_COUNT, true );
 			$required_per_qty = max( 1, $required_per_qty );
 			$qty              = isset( $cart_item['quantity'] ) ? max( 1, (int) $cart_item['quantity'] ) : 1;
 			$required_total   = $required_per_qty * $qty;
 			$current_images   = isset( $cart_item[ self::CART_KEY ] ) && is_array( $cart_item[ self::CART_KEY ] ) ? count( $cart_item[ self::CART_KEY ] ) : 0;
 
 			if ( $current_images !== $required_total ) {
-				wc_add_notice(
-					sprintf(
-						__( 'Product "%1$s" requires %2$d image(s) for quantity %3$d, but %4$d are attached. Please remove this item and add it again with the correct images.', 'woo-order-images' ),
-						$product->get_name(),
-						$required_total,
-						$qty,
-						$current_images
-					),
-					'error'
+				$missing_items[] = array(
+					'name'     => $product->get_name(),
+					'required' => $required_total,
+					'current'  => $current_images,
+					'qty'      => $qty,
 				);
 			}
+		}
+
+		if ( 1 === count( $missing_items ) ) {
+			$item = $missing_items[0];
+			wc_add_notice(
+				sprintf(
+					__( 'Product "%1$s" requires %2$d image(s) for quantity %3$d, but %4$d are attached. Please edit this item in your cart before checkout.', 'woo-order-images' ),
+					$item['name'],
+					$item['required'],
+					$item['qty'],
+					$item['current']
+				),
+				'error'
+			);
+		} elseif ( count( $missing_items ) > 1 ) {
+			wc_add_notice(
+				__( 'Some of your items are missing required images. Please edit each flagged item in your cart before checkout.', 'woo-order-images' ),
+				'error'
+			);
 		}
 	}
 
@@ -289,6 +384,25 @@ class WOI_Order_Images {
 		}
 
 		return (bool) preg_match( '#^data:image/(png|jpeg|jpg|webp);base64,#i', $value );
+	}
+
+	private function is_valid_existing_upload_url( $value ) {
+		if ( ! is_string( $value ) || '' === trim( $value ) ) {
+			return false;
+		}
+
+		$uploads = wp_upload_dir();
+		if ( empty( $uploads['baseurl'] ) ) {
+			return false;
+		}
+
+		$baseurl = trailingslashit( $uploads['baseurl'] ) . 'woo-order-images/';
+		if ( 0 !== strpos( $value, $baseurl ) ) {
+			return false;
+		}
+
+		$path = $this->url_to_upload_path( $value );
+		return (bool) ( $path && file_exists( $path ) );
 	}
 
 	private function save_data_url_image( $data_url ) {

@@ -10,7 +10,10 @@
 		const visibleAspectRatio = parseFloat(container.getAttribute('data-woi-visible-aspect-ratio') || '1');
 		const visibleWidthPercent = parseFloat(container.getAttribute('data-woi-visible-width-percent') || '100');
 		const visibleHeightPercent = parseFloat(container.getAttribute('data-woi-visible-height-percent') || '100');
+		const existingImagesRaw = container.getAttribute('data-woi-existing-images') || '[]';
+		const existingQty = Math.max(0, parseInt(container.getAttribute('data-woi-existing-qty') || '0', 10));
 		const orientationSwapButton = document.querySelector('[data-woi-swap-orientation]');
+		const rotateButton = document.querySelector('[data-woi-rotate]');
 		const form = container.closest('form.cart');
 		const multiFileInput = container.querySelector('[data-woi-multi-file]');
 		const slotsWrap = container.querySelector('[data-woi-upload-slots]');
@@ -19,11 +22,12 @@
 		const textNode = container.querySelector('.woi-requirement-text');
 		const modal = document.querySelector('[data-woi-modal]');
 		const modalImage = modal ? modal.querySelector('[data-woi-cropper-image]') : null;
-		const visibleGuide = modal ? modal.querySelector('.woi-visible-area-guide') : null;
+		const zoomSlider = modal ? modal.querySelector('[data-woi-zoom-slider]') : null;
+		const zoomValue = modal ? modal.querySelector('[data-woi-zoom-value]') : null;
 		const saveCropButton = modal ? modal.querySelector('[data-woi-save-crop]') : null;
 		const closeButtons = modal ? modal.querySelectorAll('[data-woi-close]') : [];
 
-		if (!form || !multiFileInput || !slotsWrap || !slotTemplate || !quantityInput || !textNode || !modal || !modalImage || !saveCropButton || !visibleGuide || !orientationSwapButton) {
+		if (!form || !multiFileInput || !slotsWrap || !slotTemplate || !quantityInput || !textNode || !modal || !modalImage || !saveCropButton || !orientationSwapButton || !rotateButton) {
 			return;
 		}
 
@@ -37,12 +41,47 @@
 		const portraitVisibleWidthPercent = landscapeVisibleHeightPercent;
 		const portraitVisibleHeightPercent = landscapeVisibleWidthPercent;
 		const defaultOrientation = visibleAspectRatio >= 1 ? 'landscape' : 'portrait';
+		let existingImages = [];
+		try {
+			existingImages = JSON.parse(existingImagesRaw);
+			if (!Array.isArray(existingImages)) {
+				existingImages = [];
+			}
+		} catch (error) {
+			existingImages = [];
+		}
 
 		const state = {
 			slots: [],
 			activeIndex: -1,
 			cropper: null,
+			cropGeometry: null,
+			cropMinZoom: null,
+			cropMaxZoom: null,
 		};
+
+		const syncSliderFromCropper = () => {
+			if (!state.cropper || !zoomSlider || !zoomValue) { return; }
+			const imgData = state.cropper.getImageData();
+			const ratio = imgData.width / imgData.naturalWidth;
+			const minR = state.cropMinZoom || ratio;
+			const maxR = state.cropMaxZoom || (ratio * 4);
+			const pct = Math.max(0, Math.min(100, ((ratio - minR) / (maxR - minR)) * 100));
+			zoomSlider.value = String(Math.round(pct));
+			zoomValue.textContent = `${Math.round(ratio * 100)}%`;
+		};
+
+		if (zoomSlider) {
+			zoomSlider.addEventListener('input', () => {
+				if (!state.cropper || state.cropMinZoom === null || state.cropMaxZoom === null) { return; }
+				const pct = parseInt(zoomSlider.value, 10) / 100;
+				const targetRatio = state.cropMinZoom + pct * (state.cropMaxZoom - state.cropMinZoom);
+				state.cropper.zoomTo(targetRatio);
+				if (zoomValue) {
+					zoomValue.textContent = `${Math.round(targetRatio * 100)}%`;
+				}
+			});
+		}
 
 		const getGeometry = (orientation) => {
 			if (isSquare) {
@@ -75,13 +114,11 @@
 		};
 
 		const applyModalGuides = (geometry) => {
-			const left = (100 - geometry.visibleWidthPercent) / 2;
-			const top = (100 - geometry.visibleHeightPercent) / 2;
-
-			visibleGuide.style.left = `${left}%`;
-			visibleGuide.style.top = `${top}%`;
-			visibleGuide.style.width = `${geometry.visibleWidthPercent}%`;
-			visibleGuide.style.height = `${geometry.visibleHeightPercent}%`;
+			// Size the crop container to the full-bleed aspect ratio for this orientation
+			const cropperWrap = modal.querySelector('.woi-cropper-wrap');
+			if (cropperWrap) {
+				cropperWrap.style.aspectRatio = `${geometry.cropAspect}`;
+			}
 		};
 
 		const detectImageOrientation = (fileUrl) => new Promise((resolve) => {
@@ -184,8 +221,14 @@
 				state.cropper = null;
 			}
 
+			state.cropGeometry = geometry;
+
+			state.cropMinZoom = null;
+			state.cropMaxZoom = null;
+
 			state.cropper = new Cropper(modalImage, {
-				aspectRatio: geometry.cropAspect > 0 ? geometry.cropAspect : 1,
+				// Crop box = visible area; bleed region shows as Cropper's natural grey
+				aspectRatio: geometry.visibleAspect > 0 ? geometry.visibleAspect : 1,
 				viewMode: 1,
 				autoCropArea: 1,
 				responsive: true,
@@ -194,12 +237,48 @@
 				cropBoxMovable: false,
 				cropBoxResizable: false,
 				toggleDragModeOnDblclick: false,
+				wheelZoomRatio: 0.06,
+				zoom(event) {
+					const ratio = typeof event.detail === 'object' ? event.detail.ratio : null;
+					if (ratio === null) { return; }
+					if (state.cropMinZoom !== null && ratio < state.cropMinZoom) {
+						event.preventDefault();
+						return;
+					}
+					if (state.cropMaxZoom !== null && ratio > state.cropMaxZoom) {
+						event.preventDefault();
+						return;
+					}
+					// Sync slider after Cropper has applied the zoom
+					requestAnimationFrame(() => syncSliderFromCropper());
+				},
 				ready() {
 					const cropper = this.cropper;
 					if (!cropper) {
 						return;
 					}
-					cropper.setCropBoxData(cropper.getContainerData());
+					// Place crop box precisely over the visible area (centred within bleed container)
+					const containerData = cropper.getContainerData();
+					const geo = state.cropGeometry;
+					const cropW = containerData.width * (geo.visibleWidthPercent / 100);
+					const cropH = containerData.height * (geo.visibleHeightPercent / 100);
+					cropper.setCropBoxData({
+						left: (containerData.width - cropW) / 2,
+						top: (containerData.height - cropH) / 2,
+						width: cropW,
+						height: cropH,
+					});
+					// Compute min/max zoom bounds
+					const imgData = cropper.getImageData();
+					const currentRatio = imgData.width / imgData.naturalWidth;
+					// Min: image just covers visible area
+					state.cropMinZoom = Math.max(
+						cropW / imgData.naturalWidth,
+						cropH / imgData.naturalHeight,
+					);
+					// Max: 4× the initial fitted ratio
+					state.cropMaxZoom = currentRatio * 4;
+					syncSliderFromCropper();
 				},
 			});
 		};
@@ -291,12 +370,38 @@
 			openModalForSlot(state.activeIndex);
 		});
 
+		rotateButton.addEventListener('click', () => {
+			if (!state.cropper || state.activeIndex < 0 || !state.slots[state.activeIndex]) {
+				return;
+			}
+
+			state.cropper.rotate(90);
+		});
+
 		saveCropButton.addEventListener('click', () => {
 			if (!state.cropper || state.activeIndex < 0 || !state.slots[state.activeIndex]) {
 				return;
 			}
 
+			// Export visible area first
+			const geo = state.cropGeometry;
+			const visibleData = state.cropper.getData(true);
+			const bleedFracX = (100 / geo.visibleWidthPercent - 1) / 2;
+			const bleedFracY = (100 / geo.visibleHeightPercent - 1) / 2;
+			const bW = Math.round(visibleData.width * bleedFracX);
+			const bH = Math.round(visibleData.height * bleedFracY);
+
+			state.cropper.setData({
+				x: visibleData.x - bW,
+				y: visibleData.y - bH,
+				width: visibleData.width + 2 * bW,
+				height: visibleData.height + 2 * bH,
+				rotate: visibleData.rotate,
+				scaleX: visibleData.scaleX,
+				scaleY: visibleData.scaleY,
+			});
 			const canvas = state.cropper.getCroppedCanvas({
+				fillColor: '#ffffff',
 				imageSmoothingEnabled: true,
 				imageSmoothingQuality: 'high',
 			});
@@ -305,7 +410,29 @@
 				return;
 			}
 
-			state.slots[state.activeIndex].croppedData = canvas.toDataURL('image/jpeg', 0.92);
+			// Ensure exported canvas has the correct full bleed aspect ratio
+			// to prevent uneven scaling on the print sheet
+			const naturalAspect = canvas.width / canvas.height;
+			const targetAspect = geo.cropAspect;
+
+			let finalCanvas = canvas;
+			if (Math.abs(naturalAspect - targetAspect) > 0.01) {
+				// Resize canvas to match target aspect, keeping width and adjusting height
+				const targetHeight = Math.round(canvas.width / targetAspect);
+				finalCanvas = document.createElement('canvas');
+				finalCanvas.width = canvas.width;
+				finalCanvas.height = targetHeight;
+
+				const ctx = finalCanvas.getContext('2d');
+				ctx.fillStyle = '#ffffff';
+				ctx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
+
+				// Center the exported content vertically
+				const yOffset = (targetHeight - canvas.height) / 2;
+				ctx.drawImage(canvas, 0, yOffset);
+			}
+
+			state.slots[state.activeIndex].croppedData = finalCanvas.toDataURL('image/jpeg', 0.92);
 			renderSlots();
 			updateRequirementText();
 			closeModal();
@@ -369,6 +496,32 @@
 		container.style.setProperty('--woi-visible-aspect-ratio', `${visibleAspectRatio}`);
 		container.style.setProperty('--woi-visible-width-percent', `${visibleWidthPercent}%`);
 		container.style.setProperty('--woi-visible-height-percent', `${visibleHeightPercent}%`);
+
+		const hydrateExistingImages = async () => {
+			if (!existingImages.length) {
+				return;
+			}
+
+			for (let index = 0; index < existingImages.length && index < state.slots.length; index += 1) {
+				const imageUrl = typeof existingImages[index] === 'string' ? existingImages[index].trim() : '';
+				if (!imageUrl || !state.slots[index]) {
+					continue;
+				}
+
+				state.slots[index].fileUrl = imageUrl;
+				state.slots[index].croppedData = imageUrl;
+				state.slots[index].orientation = isSquare ? 'square' : await detectImageOrientation(imageUrl);
+			}
+
+			renderSlots();
+			updateRequirementText();
+		};
+
+		if (existingQty > 0 && existingQty !== parseInt(quantityInput.value || '1', 10)) {
+			quantityInput.value = String(existingQty);
+		}
+
 		ensureSlots();
+		hydrateExistingImages();
 	});
 })();

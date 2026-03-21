@@ -119,10 +119,9 @@
 
 .woi-cropper-wrap {
 	width: 100%;
-	min-height: 350px;
 	max-height: 65vh;
 	overflow: hidden;
-	background: #f6f7f7;
+	background: #ffffff;
 	position: relative;
 }
 
@@ -160,6 +159,60 @@
 	border-radius: 3px;
 	background: rgba(255, 255, 255, 0.9);
 	color: #111;
+}
+
+.woi-zoom-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin: 8px 0 2px;
+	padding: 0 2px;
+}
+
+.woi-zoom-label {
+	flex: 0 0 auto;
+	font-size: 13px;
+	font-weight: 600;
+	color: #50575e;
+}
+
+.woi-zoom-slider {
+	flex: 1 1 auto;
+	-webkit-appearance: none;
+	appearance: none;
+	height: 4px;
+	border-radius: 2px;
+	background: #c3c4c7;
+	outline: none;
+	cursor: pointer;
+}
+
+.woi-zoom-slider::-webkit-slider-thumb {
+	-webkit-appearance: none;
+	appearance: none;
+	width: 18px;
+	height: 18px;
+	border-radius: 50%;
+	background: #2271b1;
+	cursor: pointer;
+	border: none;
+}
+
+.woi-zoom-slider::-moz-range-thumb {
+	width: 18px;
+	height: 18px;
+	border-radius: 50%;
+	background: #2271b1;
+	cursor: pointer;
+	border: none;
+}
+
+.woi-zoom-value {
+	flex: 0 0 44px;
+	text-align: right;
+	font-size: 12px;
+	color: #50575e;
+	font-variant-numeric: tabular-nums;
 }
 
 .woi-modal-actions {

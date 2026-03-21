@@ -53,7 +53,7 @@ class WOI_Settings {
 	public function render_watermark_field() {
 		$value = self::get_watermark_text();
 		echo '<input type="text" class="regular-text" name="' . esc_attr( self::OPTION_WATERMARK_TEXT ) . '" value="' . esc_attr( $value ) . '" />';
-		echo '<p class="description">' . esc_html__( 'Text printed in the non-print wrap area.', 'woo-order-images' ) . '</p>';
+		echo '<p class="description">' . esc_html__( 'Text printed in the bleed-area flaps outside the visible area.', 'woo-order-images' ) . '</p>';
 	}
 
 	public function render_settings_page() {

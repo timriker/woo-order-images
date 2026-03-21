@@ -98,8 +98,8 @@ class WOI_Admin_Product_Settings {
 				woocommerce_wp_text_input(
 					array(
 						'id'                => self::META_WRAP_MARGIN,
-						'label'             => __( 'Wrap margin (inches)', 'woo-order-images' ),
-						'description'       => __( 'Extra image area that wraps around the edges on all sides.', 'woo-order-images' ),
+						'label'             => __( 'Bleed area (wrap margin, inches)', 'woo-order-images' ),
+						'description'       => __( 'Extra bleed area outside the visible area on all sides. This becomes the wrapping flaps.', 'woo-order-images' ),
 						'desc_tip'          => true,
 						'type'              => 'number',
 						'custom_attributes' => array(
