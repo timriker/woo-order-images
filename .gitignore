@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+composer.lock
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build/dist
+/dist/
+/build/
+*.zip
+
+# Logs
+*.log
+
+# Temporary files
+.tmp/
+temp/

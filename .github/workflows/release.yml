@@ -1,0 +1,62 @@
+name: Create Release Package
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        
+      - name: Get version from tag
+        id: tag_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        
+      - name: Create plugin directory structure
+        run: |
+          mkdir -p release/woo-order-images
+          cp -r assets includes *.php *.md release/woo-order-images/
+          
+      - name: Create zip file
+        run: |
+          cd release
+          zip -r woo-order-images-${{ steps.tag_version.outputs.VERSION }}.zip woo-order-images
+          
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.tag_version.outputs.VERSION }}
+          release_name: WOO Order Images v${{ steps.tag_version.outputs.VERSION }}
+          body: |
+            ## WOO Order Images v${{ steps.tag_version.outputs.VERSION }}
+            
+            Download `woo-order-images-${{ steps.tag_version.outputs.VERSION }}.zip` below to install on your WordPress site.
+            
+            **Installation:**
+            1. Download the .zip file
+            2. Go to WordPress Admin → Plugins → Add New
+            3. Click "Upload Plugin" and select the .zip file
+            4. Click "Install Now" then "Activate Plugin"
+            
+            **Configuration:**
+            - Visit WooCommerce → Order Images to configure settings
+            - Set per-product image requirements in each product's "Woo Order Images" tab
+          draft: false
+          prerelease: false
+          
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./release/woo-order-images-${{ steps.tag_version.outputs.VERSION }}.zip
+          asset_name: woo-order-images-${{ steps.tag_version.outputs.VERSION }}.zip
+          asset_content_type: application/zip
