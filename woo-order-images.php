@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Woo Order Images
  * Description: Adds order-linked image requirements to WooCommerce products.
- * Version: 0.2.0
+ * Version: 0.3.0
  * Requires at least: 6.8
  * Requires PHP: 7.4
  * Author: Tim Riker
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 if ( ! defined( 'WOI_VERSION' ) ) {
-	define( 'WOI_VERSION', '0.2.0' );
+	define( 'WOI_VERSION', '0.3.0' );
 }
 
 if ( ! defined( 'WOI_PLUGIN_FILE' ) ) {
