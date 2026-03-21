@@ -9,7 +9,17 @@ permissions:
   contents: write
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: PHP Lint
+        run: find . -name "*.php" -type f -exec php -l {} \;
+
   create-release:
+    needs: lint
     runs-on: ubuntu-latest
 
     steps:
