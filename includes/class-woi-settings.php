@@ -35,6 +35,7 @@ class WOI_Settings {
 	public function init() {
 		add_action( 'admin_menu', array( $this, 'register_settings_page' ) );
 		add_action( 'admin_init', array( $this, 'register_settings' ) );
+		add_action( 'admin_init', array( $this, 'handle_cleanup_request' ) );
 	}
 
 	public function register_settings_page() {
@@ -227,6 +228,22 @@ class WOI_Settings {
 		if ( ! current_user_can( 'manage_woocommerce' ) ) {
 			wp_die( esc_html__( 'You do not have permission to view this page.', 'woo-order-images' ) );
 		}
+
+		// Display cleanup result message if redirected from cleanup.
+		// phpcs:disable WordPress.Security.NonceVerification.Recommended
+		if ( isset( $_GET['woi_cleanup_result'] ) ) {
+			$deleted = absint( wp_unslash( $_GET['woi_cleanup_result'] ) );
+			if ( $deleted > 0 ) {
+				echo '<div class="notice notice-success is-dismissible"><p>';
+				echo esc_html( sprintf( __( 'Cleanup complete: Deleted %d orphaned image file(s).', 'woo-order-images' ), $deleted ) );
+				echo '</p></div>';
+			} else {
+				echo '<div class="notice notice-info is-dismissible"><p>';
+				echo esc_html__( 'Cleanup complete: No orphaned files to delete.', 'woo-order-images' );
+				echo '</p></div>';
+			}
+		}
+		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 		?>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'Woo Order Images Settings', 'woo-order-images' ); ?></h1>
@@ -237,6 +254,36 @@ class WOI_Settings {
 				submit_button();
 				?>
 			</form>
+
+			<hr style="margin: 2em 0;">
+
+			<div class="postbox">
+				<h2 class="hndle"><span><?php esc_html_e( 'Image Cleanup', 'woo-order-images' ); ?></span></h2>
+				<div class="inside">
+					<p><?php esc_html_e( 'Cleanup orphaned image files that are no longer attached to any order.', 'woo-order-images' ); ?></p>
+					<?php
+					$orphaned_count = $this->count_orphaned_images();
+					if ( $orphaned_count > 0 ) {
+						echo '<p><strong>' . esc_html( sprintf( __( 'Found %d orphaned file(s)', 'woo-order-images' ), $orphaned_count ) ) . '</strong></p>';
+						?>
+						<form method="post" style="margin-top: 1em;">
+							<?php
+							wp_nonce_field( 'woi_cleanup_action', 'woi_cleanup_nonce' );
+							submit_button(
+								__( 'Delete Orphaned Files', 'woo-order-images' ),
+								'delete',
+								'woi_cleanup_action',
+								false
+							);
+							?>
+						</form>
+						<?php
+					} else {
+						echo '<p><em>' . esc_html__( 'No orphaned files found.', 'woo-order-images' ) . '</em></p>';
+					}
+					?>
+				</div>
+			</div>
 		</div>
 		<?php
 	}
@@ -291,5 +338,163 @@ class WOI_Settings {
 			'width'  => self::$PAGE_SIZES[ $size ]['width'],
 			'height' => self::$PAGE_SIZES[ $size ]['height'],
 		) : null;
+	}
+
+	/**
+	 * Handle cleanup request from admin form.
+	 */
+	public function handle_cleanup_request() {
+		// phpcs:disable WordPress.Security.NonceVerification.Missing
+		if ( ! isset( $_POST['woi_cleanup_action'] ) ) {
+			return;
+		}
+
+		if ( ! current_user_can( 'manage_woocommerce' ) ) {
+			return;
+		}
+
+		if ( ! isset( $_POST['woi_cleanup_nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['woi_cleanup_nonce'] ) ), 'woi_cleanup_action' ) ) {
+			return;
+		}
+		// phpcs:enable WordPress.Security.NonceVerification.Missing
+
+		$deleted = $this->cleanup_orphaned_images();
+
+		// Redirect with result message.
+		$redirect_url = add_query_arg(
+			array(
+				'page'      => 'woi-settings',
+				'woi_cleanup_result' => $deleted,
+			),
+			admin_url( 'admin.php' )
+		);
+
+		wp_safe_remote_post( wp_nonce_url( $redirect_url, 'wp_http_nonce' ) );
+		wp_redirect( $redirect_url );
+		exit;
+	}
+
+	/**
+	 * Count orphaned image files (on disk but not in any order).
+	 *
+	 * @return int Number of orphaned files.
+	 */
+	public function count_orphaned_images() {
+		global $wpdb;
+
+		// Get all image URLs from database.
+		$results = $wpdb->get_results(
+			"SELECT meta_value FROM {$wpdb->prefix}woocommerce_order_itemmeta WHERE meta_key = '_woi_image_urls'"
+		);
+
+		$db_urls = array();
+		foreach ( $results as $row ) {
+			$urls = maybe_unserialize( $row->meta_value );
+			if ( is_array( $urls ) ) {
+				foreach ( $urls as $url ) {
+					if ( is_string( $url ) && ! empty( $url ) ) {
+						$db_urls[ $url ] = true;
+					}
+				}
+			}
+		}
+
+		// Get all files from disk.
+		$uploads_dir = wp_upload_dir();
+		$woi_dir     = trailingslashit( $uploads_dir['basedir'] ) . 'woo-order-images/';
+
+		if ( ! is_dir( $woi_dir ) ) {
+			return 0;
+		}
+
+		$disk_files = array();
+		try {
+			foreach ( new RecursiveIteratorIterator(
+				new RecursiveDirectoryIterator( $woi_dir, RecursiveDirectoryIterator::SKIP_DOTS )
+			) as $file ) {
+				if ( $file->isFile() ) {
+					$disk_files[ $file->getRealPath() ] = true;
+				}
+			}
+		} catch ( Exception $e ) {
+			return 0;
+		}
+
+		// Count files not in database.
+		$orphaned = 0;
+		foreach ( array_keys( $disk_files ) as $disk_path ) {
+			// Convert disk path to URL.
+			$rel_path = str_replace( $woi_dir, '', $disk_path );
+			$url = trailingslashit( $uploads_dir['baseurl'] ) . 'woo-order-images/' . str_replace( '\\', '/', $rel_path );
+
+			if ( ! isset( $db_urls[ $url ] ) ) {
+				$orphaned++;
+			}
+		}
+
+		return $orphaned;
+	}
+
+	/**
+	 * Delete orphaned image files (on disk but not in any order).
+	 *
+	 * @return int Number of files deleted.
+	 */
+	public function cleanup_orphaned_images() {
+		global $wpdb;
+
+		// Get all image URLs from database.
+		$results = $wpdb->get_results(
+			"SELECT meta_value FROM {$wpdb->prefix}woocommerce_order_itemmeta WHERE meta_key = '_woi_image_urls'"
+		);
+
+		$db_urls = array();
+		foreach ( $results as $row ) {
+			$urls = maybe_unserialize( $row->meta_value );
+			if ( is_array( $urls ) ) {
+				foreach ( $urls as $url ) {
+					if ( is_string( $url ) && ! empty( $url ) ) {
+						$db_urls[ $url ] = true;
+					}
+				}
+			}
+		}
+
+		// Get all files from disk.
+		$uploads_dir = wp_upload_dir();
+		$woi_dir     = trailingslashit( $uploads_dir['basedir'] ) . 'woo-order-images/';
+
+		if ( ! is_dir( $woi_dir ) ) {
+			return 0;
+		}
+
+		$disk_files = array();
+		try {
+			foreach ( new RecursiveIteratorIterator(
+				new RecursiveDirectoryIterator( $woi_dir, RecursiveDirectoryIterator::SKIP_DOTS )
+			) as $file ) {
+				if ( $file->isFile() ) {
+					$disk_files[ $file->getRealPath() ] = true;
+				}
+			}
+		} catch ( Exception $e ) {
+			return 0;
+		}
+
+		// Delete orphaned files.
+		$deleted = 0;
+		foreach ( array_keys( $disk_files ) as $disk_path ) {
+			// Convert disk path to URL.
+			$rel_path = str_replace( $woi_dir, '', $disk_path );
+			$url = trailingslashit( $uploads_dir['baseurl'] ) . 'woo-order-images/' . str_replace( '\\', '/', $rel_path );
+
+			if ( ! isset( $db_urls[ $url ] ) && is_file( $disk_path ) ) {
+				if ( @unlink( $disk_path ) ) {
+					$deleted++;
+				}
+			}
+		}
+
+		return $deleted;
 	}
 }
