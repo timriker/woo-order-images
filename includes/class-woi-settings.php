@@ -262,7 +262,9 @@ class WOI_Settings {
 				<div class="inside">
 					<p><?php esc_html_e( 'Cleanup orphaned image files that are no longer attached to any order.', 'woo-order-images' ); ?></p>
 					<?php
-					$orphaned_count = $this->count_orphaned_images();
+					$image_counts = $this->get_image_cleanup_counts();
+					echo '<p>' . esc_html( sprintf( __( 'Images currently in use by orders: %d', 'woo-order-images' ), $image_counts['in_use_count'] ) ) . '</p>';
+					$orphaned_count = $image_counts['orphaned_count'];
 					if ( $orphaned_count > 0 ) {
 						echo '<p><strong>' . esc_html( sprintf( __( 'Found %d orphaned file(s)', 'woo-order-images' ), $orphaned_count ) ) . '</strong></p>';
 						?>
@@ -380,34 +382,95 @@ class WOI_Settings {
 	 * @return int Number of orphaned files.
 	 */
 	public function count_orphaned_images() {
+		$image_counts = $this->get_image_cleanup_counts();
+
+		return $image_counts['orphaned_count'];
+	}
+
+	/**
+	 * Get referenced and orphaned image counts for the cleanup UI.
+	 *
+	 * @return array{in_use_count:int, orphaned_count:int}
+	 */
+	private function get_image_cleanup_counts() {
+		$uploads_dir = wp_upload_dir();
+		$woi_dir     = trailingslashit( $uploads_dir['basedir'] ) . 'woo-order-images/';
+		$db_paths    = $this->get_referenced_image_relative_paths();
+
+		if ( ! is_dir( $woi_dir ) ) {
+			return array(
+				'in_use_count'   => count( $db_paths ),
+				'orphaned_count' => 0,
+			);
+		}
+
+		$disk_files = $this->get_disk_image_paths( $woi_dir );
+		$orphaned   = 0;
+
+		foreach ( array_keys( $disk_files ) as $disk_path ) {
+			$rel_path = $this->normalize_upload_relative_path( str_replace( $woi_dir, '', $disk_path ) );
+
+			if ( '' === $rel_path || ! isset( $db_paths[ $rel_path ] ) ) {
+				$orphaned++;
+			}
+		}
+
+		return array(
+			'in_use_count'   => count( $db_paths ),
+			'orphaned_count' => $orphaned,
+		);
+	}
+
+	/**
+	 * Get unique referenced image relative paths from order item metadata.
+	 *
+	 * @return array<string, bool>
+	 */
+	private function get_referenced_image_relative_paths() {
 		global $wpdb;
 
-		// Get all image URLs from database.
 		$results = $wpdb->get_results(
-			"SELECT meta_value FROM {$wpdb->prefix}woocommerce_order_itemmeta WHERE meta_key = '_woi_image_urls'"
+			"SELECT meta_key, meta_value FROM {$wpdb->prefix}woocommerce_order_itemmeta WHERE meta_key IN ('_woi_images','_woi_image_urls')"
 		);
 
-		$db_urls = array();
+		$db_paths = array();
 		foreach ( $results as $row ) {
-			$urls = maybe_unserialize( $row->meta_value );
-			if ( is_array( $urls ) ) {
-				foreach ( $urls as $url ) {
-					if ( is_string( $url ) && ! empty( $url ) ) {
-						$db_urls[ $url ] = true;
+			$meta_value = maybe_unserialize( $row->meta_value );
+			if ( ! is_array( $meta_value ) ) {
+				continue;
+			}
+
+			if ( '_woi_images' === $row->meta_key ) {
+				foreach ( $meta_value as $image ) {
+					$url  = is_array( $image ) && ! empty( $image['url'] ) ? (string) $image['url'] : '';
+					$path = $this->url_to_upload_relative_path( $url );
+					if ( '' !== $path ) {
+						$db_paths[ $path ] = true;
 					}
+				}
+				continue;
+			}
+
+			foreach ( $meta_value as $legacy_url ) {
+				$path = $this->url_to_upload_relative_path( is_string( $legacy_url ) ? $legacy_url : '' );
+				if ( '' !== $path ) {
+					$db_paths[ $path ] = true;
 				}
 			}
 		}
 
-		// Get all files from disk.
-		$uploads_dir = wp_upload_dir();
-		$woi_dir     = trailingslashit( $uploads_dir['basedir'] ) . 'woo-order-images/';
+		return $db_paths;
+	}
 
-		if ( ! is_dir( $woi_dir ) ) {
-			return 0;
-		}
-
+	/**
+	 * Get image file paths currently present on disk.
+	 *
+	 * @param string $woi_dir Base WOI upload directory.
+	 * @return array<string, bool>
+	 */
+	private function get_disk_image_paths( $woi_dir ) {
 		$disk_files = array();
+
 		try {
 			foreach ( new RecursiveIteratorIterator(
 				new RecursiveDirectoryIterator( $woi_dir, RecursiveDirectoryIterator::SKIP_DOTS )
@@ -417,22 +480,10 @@ class WOI_Settings {
 				}
 			}
 		} catch ( Exception $e ) {
-			return 0;
+			return array();
 		}
 
-		// Count files not in database.
-		$orphaned = 0;
-		foreach ( array_keys( $disk_files ) as $disk_path ) {
-			// Convert disk path to URL.
-			$rel_path = str_replace( $woi_dir, '', $disk_path );
-			$url = trailingslashit( $uploads_dir['baseurl'] ) . 'woo-order-images/' . str_replace( '\\', '/', $rel_path );
-
-			if ( ! isset( $db_urls[ $url ] ) ) {
-				$orphaned++;
-			}
-		}
-
-		return $orphaned;
+		return $disk_files;
 	}
 
 	/**
@@ -441,24 +492,7 @@ class WOI_Settings {
 	 * @return int Number of files deleted.
 	 */
 	public function cleanup_orphaned_images() {
-		global $wpdb;
-
-		// Get all image URLs from database.
-		$results = $wpdb->get_results(
-			"SELECT meta_value FROM {$wpdb->prefix}woocommerce_order_itemmeta WHERE meta_key = '_woi_image_urls'"
-		);
-
-		$db_urls = array();
-		foreach ( $results as $row ) {
-			$urls = maybe_unserialize( $row->meta_value );
-			if ( is_array( $urls ) ) {
-				foreach ( $urls as $url ) {
-					if ( is_string( $url ) && ! empty( $url ) ) {
-						$db_urls[ $url ] = true;
-					}
-				}
-			}
-		}
+		$db_paths = $this->get_referenced_image_relative_paths();
 
 		// Get all files from disk.
 		$uploads_dir = wp_upload_dir();
@@ -468,27 +502,14 @@ class WOI_Settings {
 			return 0;
 		}
 
-		$disk_files = array();
-		try {
-			foreach ( new RecursiveIteratorIterator(
-				new RecursiveDirectoryIterator( $woi_dir, RecursiveDirectoryIterator::SKIP_DOTS )
-			) as $file ) {
-				if ( $file->isFile() ) {
-					$disk_files[ $file->getRealPath() ] = true;
-				}
-			}
-		} catch ( Exception $e ) {
-			return 0;
-		}
+		$disk_files = $this->get_disk_image_paths( $woi_dir );
 
 		// Delete orphaned files.
 		$deleted = 0;
 		foreach ( array_keys( $disk_files ) as $disk_path ) {
-			// Convert disk path to URL.
-			$rel_path = str_replace( $woi_dir, '', $disk_path );
-			$url = trailingslashit( $uploads_dir['baseurl'] ) . 'woo-order-images/' . str_replace( '\\', '/', $rel_path );
+			$rel_path = $this->normalize_upload_relative_path( str_replace( $woi_dir, '', $disk_path ) );
 
-			if ( ! isset( $db_urls[ $url ] ) && is_file( $disk_path ) ) {
+			if ( '' !== $rel_path && ! isset( $db_paths[ $rel_path ] ) && is_file( $disk_path ) ) {
 				if ( @unlink( $disk_path ) ) {
 					$deleted++;
 				}
@@ -496,5 +517,46 @@ class WOI_Settings {
 		}
 
 		return $deleted;
+	}
+
+	/**
+	 * Convert an uploads URL into an uploads-relative path.
+	 *
+	 * @param string $url Uploaded file URL.
+	 * @return string
+	 */
+	private function url_to_upload_relative_path( $url ) {
+		if ( '' === $url ) {
+			return '';
+		}
+
+		$uploads = wp_upload_dir();
+		$baseurl = isset( $uploads['baseurl'] ) ? (string) $uploads['baseurl'] : '';
+		if ( '' === $baseurl ) {
+			return '';
+		}
+
+		$normalized_url     = untrailingslashit( strtolower( (string) $url ) );
+		$normalized_baseurl = untrailingslashit( strtolower( $baseurl ) );
+		if ( 0 !== strpos( $normalized_url, $normalized_baseurl . '/' ) ) {
+			return '';
+		}
+
+		$relative = substr( (string) $url, strlen( $baseurl ) + 1 );
+
+		return $this->normalize_upload_relative_path( $relative );
+	}
+
+	/**
+	 * Normalize uploads-relative path format for stable comparisons.
+	 *
+	 * @param string $relative_path Relative path under uploads.
+	 * @return string
+	 */
+	private function normalize_upload_relative_path( $relative_path ) {
+		$path = str_replace( '\\', '/', trim( (string) $relative_path ) );
+		$path = ltrim( $path, '/' );
+
+		return $path;
 	}
 }

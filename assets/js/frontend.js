@@ -5,11 +5,18 @@
 	}
 
 	containers.forEach((container) => {
+		const ajaxConfig = (typeof window.woiFrontend === 'object' && window.woiFrontend)
+			? window.woiFrontend
+			: null;
 		const base = Math.max(1, parseInt(container.getAttribute('data-woi-required-base') || '1', 10));
 		const aspectRatio = parseFloat(container.getAttribute('data-woi-aspect-ratio') || '1');
 		const visibleAspectRatio = parseFloat(container.getAttribute('data-woi-visible-aspect-ratio') || '1');
 		const visibleWidthPercent = parseFloat(container.getAttribute('data-woi-visible-width-percent') || '100');
 		const visibleHeightPercent = parseFloat(container.getAttribute('data-woi-visible-height-percent') || '100');
+		const isPuzzle = container.getAttribute('data-woi-is-puzzle') === '1';
+		const puzzleCols = Math.max(1, parseInt(container.getAttribute('data-woi-puzzle-cols') || '1', 10));
+		const puzzleRows = Math.max(1, parseInt(container.getAttribute('data-woi-puzzle-rows') || '1', 10));
+		const puzzleAspectRatio = parseFloat(container.getAttribute('data-woi-puzzle-aspect-ratio') || '1');
 		const existingImagesRaw = container.getAttribute('data-woi-existing-images') || '[]';
 		const existingQty = Math.max(0, parseInt(container.getAttribute('data-woi-existing-qty') || '0', 10));
 		const orientationSwapButton = document.querySelector('[data-woi-swap-orientation]');
@@ -26,6 +33,7 @@
 		const zoomValue = modal ? modal.querySelector('[data-woi-zoom-value]') : null;
 		const saveCropButton = modal ? modal.querySelector('[data-woi-save-crop]') : null;
 		const closeButtons = modal ? modal.querySelectorAll('[data-woi-close]') : [];
+		const puzzleGrid = modal ? modal.querySelector('[data-woi-puzzle-grid]') : null;
 
 		if (!form || !multiFileInput || !slotsWrap || !slotTemplate || !quantityInput || !textNode || !modal || !modalImage || !saveCropButton || !orientationSwapButton || !rotateButton) {
 			return;
@@ -124,6 +132,16 @@
 		}
 
 		const getGeometry = (orientation) => {
+			if (isPuzzle) {
+				return {
+					cropAspect: puzzleAspectRatio > 0 ? puzzleAspectRatio : 1,
+					visibleAspect: puzzleAspectRatio > 0 ? puzzleAspectRatio : 1,
+					visibleWidthPercent,
+					visibleHeightPercent,
+					orientation: 'puzzle',
+				};
+			}
+
 			if (isSquare) {
 				return {
 					cropAspect: 1,
@@ -159,6 +177,40 @@
 			if (cropperWrap) {
 				cropperWrap.style.aspectRatio = `${geometry.cropAspect}`;
 			}
+
+			if (puzzleGrid) {
+				if (isPuzzle) {
+					puzzleGrid.hidden = false;
+					puzzleGrid.style.setProperty('--woi-puzzle-cols', `${puzzleCols}`);
+					puzzleGrid.style.setProperty('--woi-puzzle-rows', `${puzzleRows}`);
+					const label = puzzleGrid.querySelector('[data-woi-puzzle-grid-label]');
+					if (label) {
+						label.textContent = `${puzzleCols}×${puzzleRows} puzzle grid`;
+					}
+				} else {
+					puzzleGrid.hidden = true;
+					puzzleGrid.style.left = '';
+					puzzleGrid.style.top = '';
+					puzzleGrid.style.width = '';
+					puzzleGrid.style.height = '';
+				}
+			}
+		};
+
+		const syncPuzzleGridToCropBox = () => {
+			if (!isPuzzle || !puzzleGrid || !state.cropper) {
+				return;
+			}
+
+			const cropBox = state.cropper.getCropBoxData();
+			if (!cropBox || cropBox.width <= 0 || cropBox.height <= 0) {
+				return;
+			}
+
+			puzzleGrid.style.left = `${cropBox.left}px`;
+			puzzleGrid.style.top = `${cropBox.top}px`;
+			puzzleGrid.style.width = `${cropBox.width}px`;
+			puzzleGrid.style.height = `${cropBox.height}px`;
 		};
 
 		const detectImageOrientation = (fileUrl) => new Promise((resolve) => {
@@ -167,18 +219,6 @@
 				resolve(image.naturalWidth >= image.naturalHeight ? 'landscape' : 'portrait');
 			};
 			image.onerror = () => resolve(defaultOrientation);
-			image.src = fileUrl;
-		});
-
-		/**
-		 * Load an image from URL and return the loaded Image object.
-		 * @param {string} fileUrl - URL of the image to load
-		 * @returns {Promise<Image>} Loaded Image object with naturalWidth/naturalHeight
-		 */
-		const loadImage = (fileUrl) => new Promise((resolve, reject) => {
-			const image = new Image();
-			image.onload = () => resolve(image);
-			image.onerror = () => reject(new Error('Unable to load image for export.'));
 			image.src = fileUrl;
 		});
 
@@ -199,7 +239,37 @@
 
 			cleanupSlotUrl(slot);
 			slot.fileUrl = URL.createObjectURL(file);
-			slot.croppedData = '';
+			const dataUrl = await new Promise((resolve, reject) => {
+				const reader = new FileReader();
+				reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+				reader.onerror = () => reject(new Error('Unable to read image file.'));
+				reader.readAsDataURL(file);
+			});
+
+			if (!ajaxConfig || !ajaxConfig.ajaxUrl || !ajaxConfig.nonce) {
+				throw new Error('Image upload endpoint is unavailable.');
+			}
+
+			const formData = new FormData();
+			formData.append('action', 'woi_stage_image_upload');
+			formData.append('nonce', ajaxConfig.nonce);
+			formData.append('source', dataUrl);
+
+			const response = await fetch(ajaxConfig.ajaxUrl, {
+				method: 'POST',
+				credentials: 'same-origin',
+				body: formData,
+			});
+
+			const result = await response.json().catch(() => ({}));
+			if (!response.ok || !result || result.success !== true || !result.data || !result.data.url) {
+				throw new Error('Unable to stage image upload.');
+			}
+
+			slot.sourceData = '';
+			slot.sourceUrl = result.data.url;
+			slot.previewData = '';
+			slot.crop = null;
 			slot.orientation = isSquare ? 'square' : await detectImageOrientation(slot.fileUrl);
 			slot.rotation = 0;
 		};
@@ -233,7 +303,11 @@
 
 		const updateRequirementText = () => {
 			const required = getRequiredTotal();
-			const complete = state.slots.filter((slot) => !!slot.croppedData).length;
+			const complete = state.slots.filter((slot) => !!slot.crop && !!slot.sourceUrl).length;
+			if (isPuzzle) {
+				textNode.textContent = `Puzzle mode requires ${required} full-image upload(s). Completed: ${complete}/${required}.`;
+				return;
+			}
 			textNode.textContent = `This order requires ${required} image(s). Completed: ${complete}/${required}.`;
 		};
 
@@ -248,7 +322,10 @@
 			while (state.slots.length < required) {
 				state.slots.push({
 					fileUrl: '',
-					croppedData: '',
+					sourceData: '',
+					sourceUrl: '',
+					previewData: '',
+					crop: null,
 					orientation: defaultOrientation,
 					rotation: 0,
 				});
@@ -270,9 +347,15 @@
 			modalImage.src = slot.fileUrl;
 			applyModalGuides(geometry);
 			orientationSwapButton.disabled = isSquare;
+			if (isPuzzle) {
+				orientationSwapButton.disabled = true;
+			}
 			orientationSwapButton.textContent = isSquare
 				? 'Orientation fixed (square)'
 				: `Swap to ${geometry.orientation === 'landscape' ? 'Portrait' : 'Landscape'}`;
+			if (isPuzzle) {
+				orientationSwapButton.textContent = 'Orientation fixed (puzzle grid)';
+			}
 
 			if (state.cropper) {
 				state.cropper.destroy();
@@ -296,15 +379,30 @@
 				cropBoxResizable: false,
 				toggleDragModeOnDblclick: false,
 				wheelZoomRatio: 0.06,
+				crop() {
+					syncPuzzleGridToCropBox();
+				},
 				zoom(event) {
 					const ratio = typeof event.detail === 'object' ? event.detail.ratio : null;
 					if (ratio === null) { return; }
 					if (state.cropMinZoom !== null && ratio < state.cropMinZoom) {
 						event.preventDefault();
+						requestAnimationFrame(() => {
+							if (state.cropper && state.cropMinZoom !== null) {
+								state.cropper.zoomTo(state.cropMinZoom);
+								syncSliderFromCropper();
+							}
+						});
 						return;
 					}
 					if (state.cropMaxZoom !== null && ratio > state.cropMaxZoom) {
 						event.preventDefault();
+						requestAnimationFrame(() => {
+							if (state.cropper && state.cropMaxZoom !== null) {
+								state.cropper.zoomTo(state.cropMaxZoom);
+								syncSliderFromCropper();
+							}
+						});
 						return;
 					}
 					// Sync slider after Cropper has applied the zoom
@@ -326,24 +424,32 @@
 						width: cropW,
 						height: cropH,
 					});
-					// Compute min/max zoom bounds
-					const imgData = cropper.getImageData();
-					const currentRatio = imgData.width / imgData.naturalWidth;
-					// Min: image just covers visible area
-					state.cropMinZoom = Math.max(
-						cropW / imgData.naturalWidth,
-						cropH / imgData.naturalHeight,
-					);
-					// Max: 4× the initial fitted ratio
-					state.cropMaxZoom = currentRatio * 4;
 
-					// Default to visible-area fit (not full-bleed fit), so bleed stays white
-					// unless the user explicitly zooms in.
-					if (state.cropMinZoom !== null && currentRatio > state.cropMinZoom) {
-						cropper.zoomTo(state.cropMinZoom);
-					}
+					const applyZoomBounds = () => {
+						if (!state.cropper) {
+							return;
+						}
+						const settledCropBox = cropper.getCropBoxData();
+						const effectiveCropW = settledCropBox && settledCropBox.width > 0 ? settledCropBox.width : cropW;
+						const effectiveCropH = settledCropBox && settledCropBox.height > 0 ? settledCropBox.height : cropH;
+						const imgData = cropper.getImageData();
+						const currentRatio = imgData.width / imgData.naturalWidth;
 
-					syncSliderFromCropper();
+						state.cropMinZoom = Math.max(
+							effectiveCropW / imgData.naturalWidth,
+							effectiveCropH / imgData.naturalHeight,
+						);
+						state.cropMaxZoom = currentRatio * 4;
+
+						if (state.cropMinZoom !== null && currentRatio > state.cropMinZoom) {
+							cropper.zoomTo(state.cropMinZoom);
+						}
+
+						syncSliderFromCropper();
+						syncPuzzleGridToCropBox();
+					};
+
+					requestAnimationFrame(() => requestAnimationFrame(applyZoomBounds));
 				},
 			});
 		};
@@ -356,6 +462,13 @@
 			modal.hidden = true;
 			modalImage.removeAttribute('src');
 			state.activeIndex = -1;
+			if (puzzleGrid) {
+				puzzleGrid.hidden = true;
+				puzzleGrid.style.left = '';
+				puzzleGrid.style.top = '';
+				puzzleGrid.style.width = '';
+				puzzleGrid.style.height = '';
+			}
 		};
 
 		const renderSlots = () => {
@@ -375,10 +488,16 @@
 
 				title.textContent = `Image ${index + 1}`;
 				previewWrap.style.aspectRatio = `${geometry.visibleAspect}`;
-				hiddenInput.value = slot.croppedData || '';
+				const payload = (slot.crop && slot.sourceUrl)
+					? {
+						source: slot.sourceUrl,
+						crop: slot.crop,
+					}
+					: null;
+				hiddenInput.value = payload ? JSON.stringify(payload) : '';
 
-				if (slot.croppedData) {
-					preview.src = slot.croppedData;
+				if (slot.previewData) {
+					preview.src = slot.previewData;
 					preview.classList.add('woi-preview--visible');
 				} else if (slot.fileUrl) {
 					preview.src = slot.fileUrl;
@@ -402,7 +521,13 @@
 						return;
 					}
 
-					await assignFileToSlot(slot, file);
+					try {
+						await assignFileToSlot(slot, file);
+					} catch (error) {
+						window.alert('Unable to upload this image right now. Please try again.');
+						event.target.value = '';
+						return;
+					}
 					renderSlots();
 					updateRequirementText();
 					openModalForSlot(index);
@@ -417,7 +542,7 @@
 					openModalForSlot(index);
 				});
 
-				if (slot.croppedData) {
+				if (slot.crop && slot.sourceUrl) {
 					root.classList.add('woi-upload-slot--complete');
 				}
 
@@ -445,6 +570,42 @@
 				.then(async (rotatedUrl) => {
 					cleanupSlotUrl(slot);
 					slot.fileUrl = rotatedUrl;
+					const dataUrl = await new Promise((resolve, reject) => {
+						fetch(rotatedUrl)
+							.then((response) => response.blob())
+							.then((blob) => {
+								const reader = new FileReader();
+								reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+								reader.onerror = () => reject(new Error('Unable to read rotated image.'));
+								reader.readAsDataURL(blob);
+							})
+							.catch(() => reject(new Error('Unable to read rotated image.')));
+					});
+
+					if (!ajaxConfig || !ajaxConfig.ajaxUrl || !ajaxConfig.nonce) {
+						throw new Error('Image upload endpoint is unavailable.');
+					}
+
+					const formData = new FormData();
+					formData.append('action', 'woi_stage_image_upload');
+					formData.append('nonce', ajaxConfig.nonce);
+					formData.append('source', dataUrl);
+
+					const response = await fetch(ajaxConfig.ajaxUrl, {
+						method: 'POST',
+						credentials: 'same-origin',
+						body: formData,
+					});
+
+					const result = await response.json().catch(() => ({}));
+					if (!response.ok || !result || result.success !== true || !result.data || !result.data.url) {
+						throw new Error('Unable to stage rotated image upload.');
+					}
+
+					slot.sourceData = '';
+					slot.sourceUrl = result.data.url;
+					slot.previewData = '';
+					slot.crop = null;
 					slot.rotation = 0;
 					openModalForSlot(state.activeIndex);
 				})
@@ -458,72 +619,27 @@
 				return;
 			}
 
-			// Expand the visible crop into bleed using direct pixel math.
-			// This preserves source-image overflow where available and keeps true
-			// white tabs where the source image does not exist.
-			const geo = state.cropGeometry;
 			const visibleData = state.cropper.getData(true);
 
-			// Calculate bleed expansion as a fraction of visible area.
-			// If visible area = x% of total, then bleed on each side = (100 - x) / 2 % of total.
-			// Convert to ratio: (100 / visible% - 1) / 2 gives the fraction to expand by.
-			// Example: visible=80% → (100/80 - 1)/2 = 0.125 (expand by 12.5% on each side).
-			const bleedFracX = (100 / geo.visibleWidthPercent - 1) / 2;
-			const bleedFracY = (100 / geo.visibleHeightPercent - 1) / 2;
-
-			// Convert fraction into pixel expansion.
-			const bW = visibleData.width * bleedFracX;
-			const bH = visibleData.height * bleedFracY;
-
-			// Expand crop rectangle to include bleed.
-			const exportX = visibleData.x - bW;
-			const exportY = visibleData.y - bH;
-			const exportW = visibleData.width + (2 * bW);
-			const exportH = visibleData.height + (2 * bH);
-
-			const finalWidth = Math.max(1, Math.round(exportW));
-			const finalHeight = Math.max(1, Math.round(exportH));
-			const canvas = document.createElement('canvas');
-			canvas.width = finalWidth;
-			canvas.height = finalHeight;
-
-			const ctx = canvas.getContext('2d');
-			if (!ctx) {
-				return;
-			}
-
-			// Fill entire canvas with white (fallback for areas outside source image).
-			ctx.fillStyle = '#ffffff';
-			ctx.fillRect(0, 0, finalWidth, finalHeight);
-
 			const slot = state.slots[state.activeIndex];
-			if (!slot.fileUrl) {
+			if (!slot.fileUrl || (!slot.sourceData && !slot.sourceUrl)) {
 				return;
 			}
+
+			slot.crop = {
+				x: visibleData.x,
+				y: visibleData.y,
+				width: visibleData.width,
+				height: visibleData.height,
+			};
 
 			try {
-				const sourceImage = await loadImage(slot.fileUrl);
-
-				// Clip the source image to the requested export region, clamping to image bounds.
-				// If export rect extends beyond image, nothing is drawn (white background shows).
-				const srcX = Math.max(0, exportX);
-				const srcY = Math.max(0, exportY);
-				const srcRight = Math.min(sourceImage.naturalWidth, exportX + exportW);
-				const srcBottom = Math.min(sourceImage.naturalHeight, exportY + exportH);
-				const srcW = Math.max(0, srcRight - srcX);
-				const srcH = Math.max(0, srcBottom - srcY);
-
-				if (srcW > 0 && srcH > 0) {
-					const destX = srcX - exportX;
-					const destY = srcY - exportY;
-					ctx.drawImage(sourceImage, srcX, srcY, srcW, srcH, destX, destY, srcW, srcH);
-				}
+				const previewCanvas = state.cropper.getCroppedCanvas();
+				slot.previewData = previewCanvas ? previewCanvas.toDataURL('image/jpeg', 0.85) : '';
 			} catch (error) {
-				window.alert('Unable to save crop right now. Please try again.');
-				return;
+				slot.previewData = '';
 			}
 
-			state.slots[state.activeIndex].croppedData = canvas.toDataURL('image/jpeg', 0.92);
 			renderSlots();
 			updateRequirementText();
 			closeModal();
@@ -558,7 +674,13 @@
 				const file = filesToUse[fileIndex];
 				const targetIndex = indexes[fileIndex];
 				if (typeof targetIndex === 'number' && state.slots[targetIndex]) {
-					await assignFileToSlot(state.slots[targetIndex], file);
+					try {
+						await assignFileToSlot(state.slots[targetIndex], file);
+					} catch (error) {
+						window.alert('One or more images could not be uploaded. Please try again.');
+						event.target.value = '';
+						return;
+					}
 				}
 			}
 
@@ -574,7 +696,7 @@
 
 		form.addEventListener('submit', (event) => {
 			const required = getRequiredTotal();
-			const complete = state.slots.filter((slot) => !!slot.croppedData).length;
+			const complete = state.slots.filter((slot) => !!slot.crop && !!slot.sourceUrl).length;
 			if (complete !== required) {
 				event.preventDefault();
 				window.alert(`Please upload and crop all ${required} required images before adding to cart.`);
@@ -594,13 +716,21 @@
 			}
 
 			for (let index = 0; index < existingImages.length && index < state.slots.length; index += 1) {
-				const imageUrl = typeof existingImages[index] === 'string' ? existingImages[index].trim() : '';
+				const entry = existingImages[index];
+				const imageUrl = entry && typeof entry === 'object' && typeof entry.url === 'string'
+					? entry.url.trim()
+					: (typeof entry === 'string' ? entry.trim() : '');
 				if (!imageUrl || !state.slots[index]) {
 					continue;
 				}
 
 				state.slots[index].fileUrl = imageUrl;
-				state.slots[index].croppedData = imageUrl;
+				state.slots[index].sourceUrl = imageUrl;
+				state.slots[index].sourceData = '';
+				state.slots[index].previewData = imageUrl;
+				state.slots[index].crop = entry && typeof entry === 'object' && entry.crop && typeof entry.crop === 'object'
+					? entry.crop
+					: null;
 				state.slots[index].orientation = isSquare ? 'square' : await detectImageOrientation(imageUrl);
 				state.slots[index].rotation = 0;
 			}

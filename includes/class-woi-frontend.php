@@ -54,6 +54,15 @@ class WOI_Frontend {
 			WOI_VERSION,
 			true
 		);
+
+		wp_localize_script(
+			'woi-frontend',
+			'woiFrontend',
+			array(
+				'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+				'nonce'   => wp_create_nonce( 'woi_stage_image_upload' ),
+			)
+		);
 	}
 
 	public function render_placeholder() {
@@ -71,6 +80,9 @@ class WOI_Frontend {
 		$required = (int) get_post_meta( $product->get_id(), WOI_Admin_Product_Settings::META_REQUIRED_COUNT, true );
 		$required = max( 1, $required );
 		$spec           = WOI_Admin_Product_Settings::get_product_spec( $product->get_id() );
+		if ( ! empty( $spec['is_puzzle'] ) ) {
+			$required = 1;
+		}
 		$update_cart_key = isset( $_REQUEST['update_cart'] ) ? wc_clean( wp_unslash( $_REQUEST['update_cart'] ) ) : '';
 		$is_update      = '' !== $update_cart_key;
 		$existing_images = array();
@@ -88,9 +100,16 @@ class WOI_Frontend {
 					if ( ! empty( $cart_item[ WOI_Order_Images::CART_KEY ] ) && is_array( $cart_item[ WOI_Order_Images::CART_KEY ] ) ) {
 						foreach ( $cart_item[ WOI_Order_Images::CART_KEY ] as $image ) {
 							if ( is_array( $image ) && ! empty( $image['url'] ) ) {
-								$existing_images[] = esc_url_raw( $image['url'] );
+								$entry = array(
+									'url'  => esc_url_raw( $image['url'] ),
+									'crop' => isset( $image['crop'] ) && is_array( $image['crop'] ) ? $image['crop'] : array(),
+								);
+								$existing_images[] = $entry;
 							} elseif ( is_string( $image ) && '' !== $image ) {
-								$existing_images[] = esc_url_raw( $image );
+								$existing_images[] = array(
+									'url'  => esc_url_raw( $image ),
+									'crop' => array(),
+								);
 							}
 						}
 					}
@@ -105,6 +124,10 @@ class WOI_Frontend {
 			data-woi-visible-aspect-ratio="<?php echo esc_attr( $spec['visible_aspect_ratio'] ); ?>"
 			data-woi-visible-width-percent="<?php echo esc_attr( $spec['visible_width_percent'] ); ?>"
 			data-woi-visible-height-percent="<?php echo esc_attr( $spec['visible_height_percent'] ); ?>"
+			data-woi-is-puzzle="<?php echo ! empty( $spec['is_puzzle'] ) ? '1' : '0'; ?>"
+			data-woi-puzzle-cols="<?php echo esc_attr( (int) $spec['puzzle_cols'] ); ?>"
+			data-woi-puzzle-rows="<?php echo esc_attr( (int) $spec['puzzle_rows'] ); ?>"
+			data-woi-puzzle-aspect-ratio="<?php echo esc_attr( $spec['puzzle_aspect_ratio'] ); ?>"
 			data-woi-existing-images="<?php echo esc_attr( wp_json_encode( array_values( $existing_images ) ) ); ?>"
 			data-woi-existing-qty="<?php echo esc_attr( $existing_qty ); ?>"
 		>
@@ -114,7 +137,15 @@ class WOI_Frontend {
 			<p><strong><?php esc_html_e( 'Image Uploads Required', 'woo-order-images' ); ?></strong></p>
 			<p class="woi-requirement-text">
 				<?php
-				if ( $is_update ) {
+				if ( ! empty( $spec['is_puzzle'] ) ) {
+					echo esc_html(
+						sprintf(
+							__( 'Puzzle mode: upload 1 image per quantity. Crop uses a %1$d×%2$d grid overlay for this product.', 'woo-order-images' ),
+							(int) $spec['puzzle_cols'],
+							(int) $spec['puzzle_rows']
+						)
+					);
+				} elseif ( $is_update ) {
 					echo esc_html(
 						sprintf(
 							__( 'This product requires %d image(s) per quantity ordered. Upload and crop each image, then click Update Cart.', 'woo-order-images' ),
@@ -133,14 +164,29 @@ class WOI_Frontend {
 			</p>
 			<p class="woi-spec-text">
 				<?php
-				echo esc_html(
-					sprintf(
-						__( 'Visible area: %1$s" × %2$s". Bleed area: %3$s" on each side. Non-square images auto-match portrait/landscape; use Swap Orientation while cropping to override.', 'woo-order-images' ),
-						$spec['visible_width'],
-						$spec['visible_height'],
-						$spec['wrap_margin']
-					)
-				);
+				if ( ! empty( $spec['is_puzzle'] ) ) {
+					echo esc_html(
+						sprintf(
+							__( 'Tile visible area: %1$s" × %2$s". Puzzle grid: %3$d×%4$d (overall crop ratio %5$s:%6$s). Bleed area: %7$s" on each side.', 'woo-order-images' ),
+							$spec['visible_width'],
+							$spec['visible_height'],
+							(int) $spec['puzzle_cols'],
+							(int) $spec['puzzle_rows'],
+							$spec['puzzle_cols'] * $spec['visible_width'],
+							$spec['puzzle_rows'] * $spec['visible_height'],
+							$spec['wrap_margin']
+						)
+					);
+				} else {
+					echo esc_html(
+						sprintf(
+							__( 'Visible area: %1$s" × %2$s". Bleed area: %3$s" on each side. Non-square images auto-match portrait/landscape; use Swap Orientation while cropping to override.', 'woo-order-images' ),
+							$spec['visible_width'],
+							$spec['visible_height'],
+							$spec['wrap_margin']
+						)
+					);
+				}
 				?>
 			</p>
 			<div class="woi-file-picker-row">
@@ -169,6 +215,9 @@ class WOI_Frontend {
 			<div class="woi-modal-content" role="dialog" aria-modal="true" aria-label="<?php esc_attr_e( 'Crop image', 'woo-order-images' ); ?>">
 				<div class="woi-cropper-wrap">
 					<img data-woi-cropper-image alt="">
+					<div class="woi-puzzle-grid" data-woi-puzzle-grid hidden>
+						<span data-woi-puzzle-grid-label></span>
+					</div>
 				</div>
 				<div class="woi-zoom-row">
 					<span class="woi-zoom-label"><?php esc_html_e( 'Zoom', 'woo-order-images' ); ?></span>

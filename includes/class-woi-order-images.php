@@ -10,16 +10,24 @@ class WOI_Order_Images {
 	const CART_VISIBLE_WIDTH_KEY = 'woi_visible_width';
 	const CART_VISIBLE_HEIGHT_KEY = 'woi_visible_height';
 	const CART_WRAP_MARGIN_KEY = 'woi_wrap_margin';
-	const ORDER_META_URLS = '_woi_image_urls';
+	const CART_IS_PUZZLE_KEY = 'woi_is_puzzle';
+	const CART_PUZZLE_COLS_KEY = 'woi_puzzle_cols';
+	const CART_PUZZLE_ROWS_KEY = 'woi_puzzle_rows';
+	const ORDER_META_IMAGES = '_woi_images';
 	const ORDER_META_COUNT = '_woi_image_count';
 	const ORDER_META_VISIBLE_WIDTH = '_woi_visible_width';
 	const ORDER_META_VISIBLE_HEIGHT = '_woi_visible_height';
 	const ORDER_META_WRAP_MARGIN = '_woi_wrap_margin';
+	const ORDER_META_IS_PUZZLE = '_woi_is_puzzle';
+	const ORDER_META_PUZZLE_COLS = '_woi_puzzle_cols';
+	const ORDER_META_PUZZLE_ROWS = '_woi_puzzle_rows';
 
 	public function init() {
 		add_filter( 'woocommerce_add_to_cart_validation', array( $this, 'validate_required_images' ), 10, 5 );
 		add_filter( 'woocommerce_add_cart_item_data', array( $this, 'add_cart_item_data' ), 10, 4 );
 		add_action( 'woocommerce_add_to_cart', array( $this, 'replace_updated_cart_item' ), 10, 6 );
+		add_action( 'wp_ajax_woi_stage_image_upload', array( $this, 'ajax_stage_image_upload' ) );
+		add_action( 'wp_ajax_nopriv_woi_stage_image_upload', array( $this, 'ajax_stage_image_upload' ) );
 		add_filter( 'woocommerce_add_to_cart_message_html', array( $this, 'filter_add_to_cart_message_html' ), 10, 2 );
 		add_filter( 'woocommerce_get_item_data', array( $this, 'render_cart_item_data' ), 10, 2 );
 		add_filter( 'woocommerce_cart_item_name', array( $this, 'render_cart_item_name' ), 10, 3 );
@@ -65,12 +73,13 @@ class WOI_Order_Images {
 				continue;
 			}
 
-			$urls = $item->get_meta( self::ORDER_META_URLS, true );
-			if ( empty( $urls ) || ! is_array( $urls ) ) {
+			$images = $item->get_meta( self::ORDER_META_IMAGES, true );
+			if ( empty( $images ) || ! is_array( $images ) ) {
 				continue;
 			}
 
-			foreach ( $urls as $url ) {
+			foreach ( $images as $image ) {
+				$url = is_array( $image ) && ! empty( $image['url'] ) ? (string) $image['url'] : '';
 				if ( ! is_string( $url ) || '' === trim( $url ) ) {
 					continue;
 				}
@@ -125,6 +134,36 @@ class WOI_Order_Images {
 		return $passed;
 	}
 
+	public function ajax_stage_image_upload() {
+		check_ajax_referer( 'woi_stage_image_upload', 'nonce' );
+
+		$source = isset( $_POST['source'] ) ? (string) wp_unslash( $_POST['source'] ) : '';
+		if ( ! $this->is_valid_data_url( $source ) ) {
+			wp_send_json_error(
+				array(
+					'message' => __( 'Invalid image payload.', 'woo-order-images' ),
+				),
+				400
+			);
+		}
+
+		$file = $this->save_data_url_image( $source );
+		if ( empty( $file['url'] ) ) {
+			wp_send_json_error(
+				array(
+					'message' => __( 'Unable to save image. Try a smaller file.', 'woo-order-images' ),
+				),
+				500
+			);
+		}
+
+		wp_send_json_success(
+			array(
+				'url' => esc_url_raw( $file['url'] ),
+			)
+		);
+	}
+
 	public function add_cart_item_data( $cart_item_data, $product_id, $variation_id, $quantity ) {
 		$product_id_for_meta = $variation_id ? $variation_id : $product_id;
 		$enabled             = get_post_meta( $product_id_for_meta, WOI_Admin_Product_Settings::META_ENABLED, true );
@@ -133,36 +172,54 @@ class WOI_Order_Images {
 			return $cart_item_data;
 		}
 
-		$images = $this->get_posted_images();
-		if ( empty( $images ) ) {
+		$image_entries = $this->get_posted_image_entries();
+		if ( empty( $image_entries ) ) {
 			return $cart_item_data;
 		}
 
+		$spec      = WOI_Admin_Product_Settings::get_product_spec( $product_id_for_meta );
+		$is_puzzle = ! empty( $spec['is_puzzle'] );
+
 		$saved = array();
-		foreach ( $images as $image_value ) {
-			if ( $this->is_valid_data_url( $image_value ) ) {
-				$file = $this->save_data_url_image( $image_value );
-				if ( ! empty( $file['url'] ) ) {
-					$saved[] = $file;
-				}
+		foreach ( $image_entries as $entry ) {
+			$source_value = isset( $entry['source'] ) ? (string) $entry['source'] : '';
+			$crop         = isset( $entry['crop'] ) && is_array( $entry['crop'] ) ? $this->sanitize_crop_data( $entry['crop'] ) : array();
+			$file         = array();
+
+			if ( $this->is_valid_data_url( $source_value ) ) {
+				$file = $this->save_data_url_image( $source_value );
+			} elseif ( $this->is_valid_existing_upload_url( $source_value ) ) {
+				$file = array(
+					'url'  => esc_url_raw( $source_value ),
+					'path' => $this->url_to_upload_path( $source_value ),
+				);
+			}
+
+			if ( empty( $file['url'] ) ) {
 				continue;
 			}
 
-			if ( $this->is_valid_existing_upload_url( $image_value ) ) {
-				$saved[] = array(
-					'url'  => esc_url_raw( $image_value ),
-					'path' => $this->url_to_upload_path( $image_value ),
-				);
+			$file['crop'] = $crop;
+			$saved[]      = $file;
+
+			if ( $is_puzzle ) {
+				break;
 			}
 		}
 
 		if ( ! empty( $saved ) ) {
-			$spec = WOI_Admin_Product_Settings::get_product_spec( $product_id_for_meta );
 			$cart_item_data[ self::CART_KEY ] = $saved;
-			$cart_item_data[ self::CART_REQUIRED_PER_QTY_KEY ] = max( 1, (int) get_post_meta( $product_id_for_meta, WOI_Admin_Product_Settings::META_REQUIRED_COUNT, true ) );
+			$required_per_qty = max( 1, (int) get_post_meta( $product_id_for_meta, WOI_Admin_Product_Settings::META_REQUIRED_COUNT, true ) );
+			if ( $is_puzzle ) {
+				$required_per_qty = 1;
+			}
+			$cart_item_data[ self::CART_REQUIRED_PER_QTY_KEY ] = $required_per_qty;
 			$cart_item_data[ self::CART_VISIBLE_WIDTH_KEY ] = $spec['visible_width'];
 			$cart_item_data[ self::CART_VISIBLE_HEIGHT_KEY ] = $spec['visible_height'];
 			$cart_item_data[ self::CART_WRAP_MARGIN_KEY ] = $spec['wrap_margin'];
+			$cart_item_data[ self::CART_IS_PUZZLE_KEY ] = $is_puzzle ? 'yes' : 'no';
+			$cart_item_data[ self::CART_PUZZLE_COLS_KEY ] = max( 1, (int) $spec['puzzle_cols'] );
+			$cart_item_data[ self::CART_PUZZLE_ROWS_KEY ] = max( 1, (int) $spec['puzzle_rows'] );
 			$cart_item_data['woi_unique']     = md5( wp_json_encode( $saved ) . microtime( true ) );
 		}
 
@@ -271,11 +328,14 @@ class WOI_Order_Images {
 		$hidden_keys[] = 'Order image count';
 		$hidden_keys[] = __( 'Order image URLs', 'woo-order-images' );
 		$hidden_keys[] = __( 'Order image count', 'woo-order-images' );
-		$hidden_keys[] = self::ORDER_META_URLS;
+		$hidden_keys[] = self::ORDER_META_IMAGES;
 		$hidden_keys[] = self::ORDER_META_COUNT;
 		$hidden_keys[] = self::ORDER_META_VISIBLE_WIDTH;
 		$hidden_keys[] = self::ORDER_META_VISIBLE_HEIGHT;
 		$hidden_keys[] = self::ORDER_META_WRAP_MARGIN;
+		$hidden_keys[] = self::ORDER_META_IS_PUZZLE;
+		$hidden_keys[] = self::ORDER_META_PUZZLE_COLS;
+		$hidden_keys[] = self::ORDER_META_PUZZLE_ROWS;
 
 		return array_values( array_unique( $hidden_keys ) );
 	}
@@ -344,48 +404,74 @@ class WOI_Order_Images {
 			return;
 		}
 
-		$urls = array();
+		$images = array();
 		foreach ( $values[ self::CART_KEY ] as $image ) {
 			if ( ! empty( $image['url'] ) ) {
-				$urls[] = esc_url_raw( $image['url'] );
+				$url = esc_url_raw( $image['url'] );
+				$images[] = array(
+					'url'  => $url,
+					'crop' => isset( $image['crop'] ) && is_array( $image['crop'] ) ? $this->sanitize_crop_data( $image['crop'] ) : array(),
+				);
 			}
 		}
 
-		if ( ! empty( $urls ) ) {
+		if ( ! empty( $images ) ) {
 			$visible_width  = isset( $values[ self::CART_VISIBLE_WIDTH_KEY ] ) ? (float) $values[ self::CART_VISIBLE_WIDTH_KEY ] : 1;
 			$visible_height = isset( $values[ self::CART_VISIBLE_HEIGHT_KEY ] ) ? (float) $values[ self::CART_VISIBLE_HEIGHT_KEY ] : 1;
 			$wrap_margin    = isset( $values[ self::CART_WRAP_MARGIN_KEY ] ) ? (float) $values[ self::CART_WRAP_MARGIN_KEY ] : 0.25;
+			$is_puzzle      = isset( $values[ self::CART_IS_PUZZLE_KEY ] ) && 'yes' === $values[ self::CART_IS_PUZZLE_KEY ];
+			$puzzle_cols    = isset( $values[ self::CART_PUZZLE_COLS_KEY ] ) ? max( 1, (int) $values[ self::CART_PUZZLE_COLS_KEY ] ) : 1;
+			$puzzle_rows    = isset( $values[ self::CART_PUZZLE_ROWS_KEY ] ) ? max( 1, (int) $values[ self::CART_PUZZLE_ROWS_KEY ] ) : 1;
 
-			$item->add_meta_data( self::ORDER_META_URLS, $urls );
-			$item->add_meta_data( self::ORDER_META_COUNT, count( $urls ) );
+			$item->add_meta_data( self::ORDER_META_IMAGES, $images );
+			$item->add_meta_data( self::ORDER_META_COUNT, count( $images ) );
 			$item->add_meta_data( self::ORDER_META_VISIBLE_WIDTH, $visible_width );
 			$item->add_meta_data( self::ORDER_META_VISIBLE_HEIGHT, $visible_height );
 			$item->add_meta_data( self::ORDER_META_WRAP_MARGIN, $wrap_margin );
+			$item->add_meta_data( self::ORDER_META_IS_PUZZLE, $is_puzzle ? 'yes' : 'no' );
+			$item->add_meta_data( self::ORDER_META_PUZZLE_COLS, $puzzle_cols );
+			$item->add_meta_data( self::ORDER_META_PUZZLE_ROWS, $puzzle_rows );
 		}
 	}
 
 	public function get_thumbnail_markup( $images, $visible_width, $visible_height, $size = 64 ) {
-		$urls = array();
+		$image_entries = array();
 		foreach ( (array) $images as $image ) {
 			if ( is_array( $image ) && ! empty( $image['url'] ) ) {
-				$urls[] = $image['url'];
+				$image_entries[] = array(
+					'url'  => $image['url'],
+					'crop' => isset( $image['crop'] ) && is_array( $image['crop'] ) ? $image['crop'] : array(),
+				);
 			} elseif ( is_string( $image ) && '' !== $image ) {
-				$urls[] = $image;
+				$image_entries[] = array(
+					'url'  => $image,
+					'crop' => array(),
+				);
 			}
 		}
 
-		if ( empty( $urls ) ) {
+		if ( empty( $image_entries ) ) {
 			return '';
 		}
 
 		$html  = '<div class="woi-inline-thumbnails" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">';
 
-		foreach ( $urls as $index => $url ) {
-			$ratio = $this->get_oriented_ratio_from_url( $url, $visible_width, $visible_height );
+		foreach ( $image_entries as $index => $entry ) {
+			$url  = isset( $entry['url'] ) ? (string) $entry['url'] : '';
+			$crop = isset( $entry['crop'] ) && is_array( $entry['crop'] ) ? $entry['crop'] : array();
+			if ( '' === $url ) {
+				continue;
+			}
+
+			$ratio     = $this->get_oriented_ratio_from_image_entry( $url, $crop, $visible_width, $visible_height );
+			$thumb_src = $this->build_thumbnail_data_url( $url, $crop, max( 64, (int) $size * 3 ) );
+			if ( '' === $thumb_src ) {
+				$thumb_src = $url;
+			}
 			$label = sprintf( __( 'Image %d', 'woo-order-images' ), $index + 1 );
 			$html .= '<a href="' . esc_url( $url ) . '" target="_blank" rel="noopener noreferrer" style="display:block;">';
 			$html .= '<span style="display:block;width:' . (int) $size . 'px;aspect-ratio:' . esc_attr( $ratio ) . ';overflow:hidden;border:1px solid #ccd0d4;border-radius:4px;background:#f6f7f7;">';
-			$html .= '<img src="' . esc_url( $url ) . '" alt="' . esc_attr( $label ) . '" style="display:block;width:100%;height:100%;object-fit:cover;" />';
+			$html .= '<img src="' . esc_attr( $thumb_src ) . '" alt="' . esc_attr( $label ) . '" style="display:block;width:100%;height:100%;object-fit:cover;" />';
 			$html .= '</span>';
 			$html .= '</a>';
 		}
@@ -393,6 +479,143 @@ class WOI_Order_Images {
 		$html .= '</div>';
 
 		return $html;
+	}
+
+	private function get_oriented_ratio_from_image_entry( $url, $crop, $visible_width, $visible_height ) {
+		$default_ratio = $visible_height > 0 ? $visible_width / $visible_height : 1;
+
+		if ( abs( $default_ratio - 1 ) < 0.0001 ) {
+			return 1;
+		}
+
+		if ( is_array( $crop ) && ! empty( $crop['width'] ) && ! empty( $crop['height'] ) ) {
+			$crop_w = (float) $crop['width'];
+			$crop_h = (float) $crop['height'];
+			if ( $crop_w > 0 && $crop_h > 0 ) {
+				$image_ratio = $crop_w / $crop_h;
+				$image_landscape = $image_ratio >= 1;
+				$default_landscape = $default_ratio >= 1;
+
+				if ( $image_landscape !== $default_landscape ) {
+					return 1 / $default_ratio;
+				}
+			}
+		}
+
+		return $this->get_oriented_ratio_from_url( $url, $visible_width, $visible_height );
+	}
+
+	private function build_thumbnail_data_url( $source_url, $crop, $max_side = 220 ) {
+		if ( ! is_array( $crop ) || empty( $crop['width'] ) || empty( $crop['height'] ) ) {
+			return '';
+		}
+
+		$path = $this->url_to_upload_path( $source_url );
+		if ( ! $path || ! is_file( $path ) ) {
+			return '';
+		}
+
+		if ( ! function_exists( 'imagecreatefromstring' ) || ! function_exists( 'imagecreatetruecolor' ) ) {
+			return '';
+		}
+
+		$raw = @file_get_contents( $path );
+		if ( false === $raw || '' === $raw ) {
+			return '';
+		}
+
+		$source = @imagecreatefromstring( $raw );
+		if ( ! $source ) {
+			return '';
+		}
+
+		$src_w = imagesx( $source );
+		$src_h = imagesy( $source );
+		if ( $src_w <= 0 || $src_h <= 0 ) {
+			imagedestroy( $source );
+			return '';
+		}
+
+		$rect = $this->normalize_crop_rect( $crop, $src_w, $src_h );
+		if ( $rect['w'] <= 0 || $rect['h'] <= 0 ) {
+			imagedestroy( $source );
+			return '';
+		}
+
+		$max_side = max( 1, (int) $max_side );
+		$scale    = min( 1, $max_side / max( $rect['w'], $rect['h'] ) );
+		$thumb_w  = max( 1, (int) round( $rect['w'] * $scale ) );
+		$thumb_h  = max( 1, (int) round( $rect['h'] * $scale ) );
+
+		$thumb = imagecreatetruecolor( $thumb_w, $thumb_h );
+		if ( ! $thumb ) {
+			imagedestroy( $source );
+			return '';
+		}
+
+		imagecopyresampled(
+			$thumb,
+			$source,
+			0,
+			0,
+			$rect['x'],
+			$rect['y'],
+			$thumb_w,
+			$thumb_h,
+			$rect['w'],
+			$rect['h']
+		);
+
+		ob_start();
+		imagejpeg( $thumb, null, 88 );
+		$jpeg = ob_get_clean();
+
+		imagedestroy( $thumb );
+		imagedestroy( $source );
+
+		if ( empty( $jpeg ) ) {
+			return '';
+		}
+
+		return 'data:image/jpeg;base64,' . base64_encode( $jpeg );
+	}
+
+	private function normalize_crop_rect( $crop, $src_w, $src_h ) {
+		$src_w = max( 1, (int) $src_w );
+		$src_h = max( 1, (int) $src_h );
+
+		if ( ! is_array( $crop ) || empty( $crop['width'] ) || empty( $crop['height'] ) ) {
+			return array(
+				'x' => 0,
+				'y' => 0,
+				'w' => $src_w,
+				'h' => $src_h,
+			);
+		}
+
+		$x = isset( $crop['x'] ) ? (float) $crop['x'] : 0.0;
+		$y = isset( $crop['y'] ) ? (float) $crop['y'] : 0.0;
+		$w = isset( $crop['width'] ) ? (float) $crop['width'] : 0.0;
+		$h = isset( $crop['height'] ) ? (float) $crop['height'] : 0.0;
+
+		$w = max( 1.0, $w );
+		$h = max( 1.0, $h );
+		$x = max( 0.0, $x );
+		$y = max( 0.0, $y );
+
+		$x1 = min( (float) $src_w, $x + $w );
+		$y1 = min( (float) $src_h, $y + $h );
+		$x  = min( $x, $x1 - 1.0 );
+		$y  = min( $y, $y1 - 1.0 );
+		$w  = max( 1.0, $x1 - $x );
+		$h  = max( 1.0, $y1 - $y );
+
+		return array(
+			'x' => (int) round( $x ),
+			'y' => (int) round( $y ),
+			'w' => max( 1, (int) round( $w ) ),
+			'h' => max( 1, (int) round( $h ) ),
+		);
 	}
 
 	private function get_oriented_ratio_from_url( $url, $visible_width, $visible_height ) {
@@ -441,14 +664,46 @@ class WOI_Order_Images {
 		return $basedir . str_replace( array( '../', '..\\' ), '', $relative );
 	}
 
-	private function get_posted_images() {
-		$images = isset( $_POST['woi_images'] ) ? (array) wp_unslash( $_POST['woi_images'] ) : array();
-		$images = array_map( 'trim', $images );
-		$images = array_filter( $images, static function ( $value ) {
-			return '' !== $value;
-		} );
+	private function get_posted_image_entries() {
+		$raw_images = isset( $_POST['woi_images'] ) ? (array) wp_unslash( $_POST['woi_images'] ) : array();
+		$entries    = array();
 
-		return array_values( $images );
+		foreach ( $raw_images as $raw_value ) {
+			if ( ! is_string( $raw_value ) ) {
+				continue;
+			}
+
+			$value = trim( $raw_value );
+			if ( '' === $value ) {
+				continue;
+			}
+
+			$decoded = json_decode( $value, true );
+			if ( ! is_array( $decoded ) || empty( $decoded['source'] ) ) {
+				continue;
+			}
+
+			$entries[] = array(
+				'source' => (string) $decoded['source'],
+				'crop'   => isset( $decoded['crop'] ) && is_array( $decoded['crop'] ) ? $decoded['crop'] : array(),
+			);
+		}
+
+		return array_values( $entries );
+	}
+
+	private function sanitize_crop_data( $crop ) {
+		$x      = isset( $crop['x'] ) ? (float) $crop['x'] : 0.0;
+		$y      = isset( $crop['y'] ) ? (float) $crop['y'] : 0.0;
+		$width  = isset( $crop['width'] ) ? (float) $crop['width'] : 0.0;
+		$height = isset( $crop['height'] ) ? (float) $crop['height'] : 0.0;
+
+		return array(
+			'x'      => $x,
+			'y'      => $y,
+			'width'  => max( 0.0, $width ),
+			'height' => max( 0.0, $height ),
+		);
 	}
 
 	private function is_valid_data_url( $value ) {

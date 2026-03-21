@@ -21,8 +21,8 @@ class WOI_Admin_Order_Images {
 		$has_images = false;
 		foreach ( $order->get_items() as $item ) {
 			if ( $item instanceof WC_Order_Item_Product ) {
-				$urls = $item->get_meta( WOI_Order_Images::ORDER_META_URLS, true );
-				if ( ! empty( $urls ) && is_array( $urls ) ) {
+				$images = $this->get_order_item_images( $item );
+				if ( ! empty( $images ) ) {
 					$has_images = true;
 					break;
 				}
@@ -48,8 +48,8 @@ class WOI_Admin_Order_Images {
 			return;
 		}
 
-		$urls = $item->get_meta( WOI_Order_Images::ORDER_META_URLS, true );
-		if ( empty( $urls ) || ! is_array( $urls ) ) {
+		$images = $this->get_order_item_images( $item );
+		if ( empty( $images ) ) {
 			return;
 		}
 
@@ -59,12 +59,21 @@ class WOI_Admin_Order_Images {
 		echo '<strong>' . esc_html__( 'Order Images', 'woo-order-images' ) . ':</strong>';
 		echo '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;">';
 
-		foreach ( $urls as $index => $url ) {
-			$spec        = $this->get_oriented_spec( $base_spec, $url );
+		foreach ( $images as $index => $entry ) {
+			$url         = isset( $entry['url'] ) ? $entry['url'] : '';
+			$crop        = isset( $entry['crop'] ) && is_array( $entry['crop'] ) ? $entry['crop'] : array();
+			if ( '' === $url ) {
+				continue;
+			}
+			$spec        = $this->get_oriented_spec_for_crop( $base_spec, $url, $crop );
+			$thumb_src   = $this->build_thumbnail_data_url( $url, $crop, 240 );
+			if ( '' === $thumb_src ) {
+				$thumb_src = $url;
+			}
 			$index_label = sprintf( __( 'Image %d', 'woo-order-images' ), ( $index + 1 ) );
 			echo '<a href="' . esc_url( $url ) . '" target="_blank" rel="noopener noreferrer" title="' . esc_attr( $index_label ) . '">';
 			echo '<span style="display:block;width:72px;aspect-ratio:' . esc_attr( $spec['visible_aspect_ratio'] ) . ';overflow:hidden;border:1px solid #ccd0d4;border-radius:4px;background:#f6f7f7;">';
-			echo '<img src="' . esc_url( $url ) . '" alt="' . esc_attr( $index_label ) . '" style="width:100%;height:100%;object-fit:cover;display:block;" />';
+			echo '<img src="' . esc_attr( $thumb_src ) . '" alt="' . esc_attr( $index_label ) . '" style="width:100%;height:100%;object-fit:cover;display:block;" />';
 			echo '</span>';
 			echo '</a>';
 		}
@@ -78,20 +87,29 @@ class WOI_Admin_Order_Images {
 			return;
 		}
 
-		$urls = $item->get_meta( WOI_Order_Images::ORDER_META_URLS, true );
-		if ( empty( $urls ) || ! is_array( $urls ) ) {
+		$images = $this->get_order_item_images( $item );
+		if ( empty( $images ) ) {
 			return;
 		}
 
 		$base_spec = $this->get_item_spec( $item );
 
 		echo '<div class="woi-order-history-images" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">';
-		foreach ( $urls as $index => $url ) {
-			$spec        = $this->get_oriented_spec( $base_spec, $url );
+		foreach ( $images as $index => $entry ) {
+			$url         = isset( $entry['url'] ) ? $entry['url'] : '';
+			$crop        = isset( $entry['crop'] ) && is_array( $entry['crop'] ) ? $entry['crop'] : array();
+			if ( '' === $url ) {
+				continue;
+			}
+			$spec        = $this->get_oriented_spec_for_crop( $base_spec, $url, $crop );
+			$thumb_src   = $this->build_thumbnail_data_url( $url, $crop, 220 );
+			if ( '' === $thumb_src ) {
+				$thumb_src = $url;
+			}
 			$index_label = sprintf( __( 'Image %d', 'woo-order-images' ), ( $index + 1 ) );
 			echo '<a href="' . esc_url( $url ) . '" target="_blank" rel="noopener noreferrer" title="' . esc_attr( $index_label ) . '">';
 			echo '<span style="display:block;width:68px;aspect-ratio:' . esc_attr( $spec['visible_aspect_ratio'] ) . ';overflow:hidden;border:1px solid #ccd0d4;border-radius:4px;background:#f6f7f7;">';
-			echo '<img src="' . esc_url( $url ) . '" alt="' . esc_attr( $index_label ) . '" style="display:block;width:100%;height:100%;object-fit:cover;" />';
+			echo '<img src="' . esc_attr( $thumb_src ) . '" alt="' . esc_attr( $index_label ) . '" style="display:block;width:100%;height:100%;object-fit:cover;" />';
 			echo '</span>';
 			echo '</a>';
 		}
@@ -115,17 +133,45 @@ class WOI_Admin_Order_Images {
 				continue;
 			}
 
-			$urls = $item->get_meta( WOI_Order_Images::ORDER_META_URLS, true );
-			if ( empty( $urls ) || ! is_array( $urls ) ) {
+			$images = $this->get_order_item_images( $item );
+			if ( empty( $images ) ) {
 				continue;
 			}
 
 			$base_spec = $this->get_item_spec( $item );
-			foreach ( $urls as $url ) {
-				$entries[] = array(
-					'url'  => $url,
-					'spec' => $this->get_oriented_spec( $base_spec, $url ),
-				);
+			foreach ( $images as $image_entry ) {
+				$url  = isset( $image_entry['url'] ) ? $image_entry['url'] : '';
+				$crop = isset( $image_entry['crop'] ) && is_array( $image_entry['crop'] ) ? $image_entry['crop'] : array();
+				if ( '' === $url ) {
+					continue;
+				}
+
+				if ( ! empty( $base_spec['is_puzzle'] ) ) {
+					$cols = max( 1, (int) $base_spec['puzzle_cols'] );
+					$rows = max( 1, (int) $base_spec['puzzle_rows'] );
+					for ( $row = 0; $row < $rows; $row++ ) {
+						for ( $col = 0; $col < $cols; $col++ ) {
+							$tile_url = $this->build_puzzle_tile_data_url( $url, $crop, $base_spec, $col, $row, $cols, $rows );
+							if ( '' === $tile_url ) {
+								continue;
+							}
+							$entries[] = array(
+								'url'  => $tile_url,
+								'spec' => $base_spec,
+							);
+						}
+					}
+				} else {
+					$oriented_spec = $this->get_oriented_spec_for_crop( $base_spec, $url, $crop );
+					$print_url     = $this->build_single_tile_data_url( $url, $crop, $oriented_spec );
+					if ( '' === $print_url ) {
+						continue;
+					}
+					$entries[] = array(
+						'url'  => $print_url,
+						'spec' => $oriented_spec,
+					);
+				}
 			}
 		}
 
@@ -297,7 +343,7 @@ class WOI_Admin_Order_Images {
 				echo '<div class="woi-tile" style="position:absolute;left:' . esc_attr( $this->format_num( $tile['x'] ) ) . 'in;top:' . esc_attr( $this->format_num( $tile['y'] ) ) . 'in;width:' . esc_attr( $this->format_num( $tile['w'] ) ) . 'in;height:' . esc_attr( $this->format_num( $tile['h'] ) ) . 'in;">';
 				echo '<div class="woi-bleed" style="aspect-ratio:' . esc_attr( $spec['full_width'] ) . ' / ' . esc_attr( $spec['full_height'] ) . ';clip-path:polygon(' . esc_attr( $clip_polygon ) . ');">';
 				echo '<div class="woi-visible-window" style="left:' . esc_attr( $this->format_pct( $window_left ) ) . ';top:' . esc_attr( $this->format_pct( $window_top ) ) . ';width:' . esc_attr( $this->format_pct( $window_width ) ) . ';height:' . esc_attr( $this->format_pct( $window_height ) ) . ';">';
-				echo '<img src="' . esc_url( $url ) . '" alt="" style="left:' . esc_attr( $image_left ) . ';top:' . esc_attr( $image_top ) . ';width:' . esc_attr( $image_width ) . ';height:' . esc_attr( $image_height ) . ';">';
+				echo '<img src="' . esc_attr( $url ) . '" alt="" style="left:' . esc_attr( $image_left ) . ';top:' . esc_attr( $image_top ) . ';width:' . esc_attr( $image_width ) . ';height:' . esc_attr( $image_height ) . ';">';
 				echo '</div>';
 
 				if ( '' !== trim( $watermark_text ) ) {
@@ -320,6 +366,29 @@ class WOI_Admin_Order_Images {
 
 		echo '</body></html>';
 		exit;
+	}
+
+	private function get_order_item_images( $item ) {
+		$images = $item->get_meta( WOI_Order_Images::ORDER_META_IMAGES, true );
+		if ( ! empty( $images ) && is_array( $images ) ) {
+			$normalized = array();
+			foreach ( $images as $image ) {
+				if ( ! is_array( $image ) || empty( $image['url'] ) ) {
+					continue;
+				}
+
+				$normalized[] = array(
+					'url'  => esc_url_raw( $image['url'] ),
+					'crop' => isset( $image['crop'] ) && is_array( $image['crop'] ) ? $image['crop'] : array(),
+				);
+			}
+
+			if ( ! empty( $normalized ) ) {
+				return $normalized;
+			}
+		}
+
+		return array();
 	}
 
 	private function get_oriented_spec( $spec, $url ) {
@@ -346,6 +415,198 @@ class WOI_Admin_Order_Images {
 		$swapped['visible_height_percent'] = $spec['visible_width_percent'];
 
 		return $swapped;
+	}
+
+	private function get_oriented_spec_for_crop( $spec, $url, $crop ) {
+		if ( is_array( $crop ) && ! empty( $crop['width'] ) && ! empty( $crop['height'] ) ) {
+			$crop_w = (float) $crop['width'];
+			$crop_h = (float) $crop['height'];
+			if ( $crop_w > 0 && $crop_h > 0 ) {
+				$ratio = $crop_w / $crop_h;
+				if ( abs( $spec['visible_aspect_ratio'] - 1 ) < 0.0001 ) {
+					return $spec;
+				}
+
+				$image_landscape   = $ratio >= 1;
+				$product_landscape = $spec['visible_aspect_ratio'] >= 1;
+				if ( $image_landscape !== $product_landscape ) {
+					$swapped = $spec;
+					$swapped['visible_width']          = $spec['visible_height'];
+					$swapped['visible_height']         = $spec['visible_width'];
+					$swapped['full_width']             = $spec['full_height'];
+					$swapped['full_height']            = $spec['full_width'];
+					$swapped['visible_aspect_ratio']   = 1 / max( 0.0001, $spec['visible_aspect_ratio'] );
+					$swapped['visible_width_percent']  = $spec['visible_height_percent'];
+					$swapped['visible_height_percent'] = $spec['visible_width_percent'];
+
+					return $swapped;
+				}
+			}
+		}
+
+		return $this->get_oriented_spec( $spec, $url );
+	}
+
+	private function build_thumbnail_data_url( $source_url, $crop, $max_side = 220 ) {
+		if ( ! is_array( $crop ) || empty( $crop['width'] ) || empty( $crop['height'] ) ) {
+			return '';
+		}
+
+		$path = $this->url_to_upload_path( $source_url );
+		if ( ! $path || ! is_file( $path ) ) {
+			return '';
+		}
+
+		if ( ! function_exists( 'imagecreatefromstring' ) || ! function_exists( 'imagecreatetruecolor' ) ) {
+			return '';
+		}
+
+		$raw = @file_get_contents( $path );
+		if ( false === $raw || '' === $raw ) {
+			return '';
+		}
+
+		$source = @imagecreatefromstring( $raw );
+		if ( ! $source ) {
+			return '';
+		}
+
+		$src_w = imagesx( $source );
+		$src_h = imagesy( $source );
+		if ( $src_w <= 0 || $src_h <= 0 ) {
+			imagedestroy( $source );
+			return '';
+		}
+
+		$rect = $this->normalize_crop_rect( $crop, $src_w, $src_h );
+		if ( $rect['w'] <= 0 || $rect['h'] <= 0 ) {
+			imagedestroy( $source );
+			return '';
+		}
+
+		$max_side = max( 1, (int) $max_side );
+		$scale    = min( 1, $max_side / max( $rect['w'], $rect['h'] ) );
+		$thumb_w  = max( 1, (int) round( $rect['w'] * $scale ) );
+		$thumb_h  = max( 1, (int) round( $rect['h'] * $scale ) );
+
+		$thumb = imagecreatetruecolor( $thumb_w, $thumb_h );
+		if ( ! $thumb ) {
+			imagedestroy( $source );
+			return '';
+		}
+
+		imagecopyresampled(
+			$thumb,
+			$source,
+			0,
+			0,
+			$rect['x'],
+			$rect['y'],
+			$thumb_w,
+			$thumb_h,
+			$rect['w'],
+			$rect['h']
+		);
+
+		ob_start();
+		imagejpeg( $thumb, null, 88 );
+		$jpeg = ob_get_clean();
+
+		imagedestroy( $thumb );
+		imagedestroy( $source );
+
+		if ( empty( $jpeg ) ) {
+			return '';
+		}
+
+		return 'data:image/jpeg;base64,' . base64_encode( $jpeg );
+	}
+
+	private function build_single_tile_data_url( $source_url, $crop, $spec ) {
+		$path = $this->url_to_upload_path( $source_url );
+		if ( ! $path || ! is_file( $path ) ) {
+			return '';
+		}
+
+		if ( ! function_exists( 'imagecreatefromstring' ) || ! function_exists( 'imagecreatetruecolor' ) ) {
+			return '';
+		}
+
+		$raw = @file_get_contents( $path );
+		if ( false === $raw || '' === $raw ) {
+			return '';
+		}
+
+		$source = @imagecreatefromstring( $raw );
+		if ( ! $source ) {
+			return '';
+		}
+
+		$src_w = imagesx( $source );
+		$src_h = imagesy( $source );
+		if ( $src_w <= 0 || $src_h <= 0 ) {
+			imagedestroy( $source );
+			return '';
+		}
+
+		$rect = $this->normalize_crop_rect( $crop, $src_w, $src_h );
+		if ( $rect['w'] <= 0 || $rect['h'] <= 0 ) {
+			imagedestroy( $source );
+			return '';
+		}
+
+		$visible_w_px = max( 1, (int) round( $rect['w'] ) );
+		$visible_h_px = max( 1, (int) round( $rect['h'] ) );
+
+		$visible_width_in  = max( 0.0001, (float) $spec['visible_width'] );
+		$visible_height_in = max( 0.0001, (float) $spec['visible_height'] );
+		$wrap_margin_in    = max( 0, (float) $spec['wrap_margin'] );
+
+		$scale_x = $visible_w_px / $visible_width_in;
+		$scale_y = $visible_h_px / $visible_height_in;
+
+		$bleed_x_px = max( 0, (int) round( $wrap_margin_in * $scale_x ) );
+		$bleed_y_px = max( 0, (int) round( $wrap_margin_in * $scale_y ) );
+
+		$full_w_px = $visible_w_px + ( 2 * $bleed_x_px );
+		$full_h_px = $visible_h_px + ( 2 * $bleed_y_px );
+
+		$tile_img = imagecreatetruecolor( $full_w_px, $full_h_px );
+		if ( ! $tile_img ) {
+			imagedestroy( $source );
+			return '';
+		}
+
+		$white = imagecolorallocate( $tile_img, 255, 255, 255 );
+		imagefill( $tile_img, 0, 0, $white );
+
+		imagecopyresampled(
+			$tile_img,
+			$source,
+			$bleed_x_px,
+			$bleed_y_px,
+			$rect['x'],
+			$rect['y'],
+			$visible_w_px,
+			$visible_h_px,
+			$rect['w'],
+			$rect['h']
+		);
+
+		$this->extend_tile_bleed_from_visible( $tile_img, $bleed_x_px, $bleed_y_px, $visible_w_px, $visible_h_px );
+
+		ob_start();
+		imagejpeg( $tile_img, null, 92 );
+		$jpeg = ob_get_clean();
+
+		imagedestroy( $tile_img );
+		imagedestroy( $source );
+
+		if ( empty( $jpeg ) ) {
+			return '';
+		}
+
+		return 'data:image/jpeg;base64,' . base64_encode( $jpeg );
 	}
 
 	private function get_image_ratio_from_url( $url ) {
@@ -430,6 +691,9 @@ class WOI_Admin_Order_Images {
 		$visible_width  = (float) $item->get_meta( WOI_Order_Images::ORDER_META_VISIBLE_WIDTH, true );
 		$visible_height = (float) $item->get_meta( WOI_Order_Images::ORDER_META_VISIBLE_HEIGHT, true );
 		$wrap_margin    = (float) $item->get_meta( WOI_Order_Images::ORDER_META_WRAP_MARGIN, true );
+		$is_puzzle      = 'yes' === $item->get_meta( WOI_Order_Images::ORDER_META_IS_PUZZLE, true );
+		$puzzle_cols    = max( 1, (int) $item->get_meta( WOI_Order_Images::ORDER_META_PUZZLE_COLS, true ) );
+		$puzzle_rows    = max( 1, (int) $item->get_meta( WOI_Order_Images::ORDER_META_PUZZLE_ROWS, true ) );
 
 		if ( $visible_width <= 0 ) {
 			$visible_width = 2.0;
@@ -450,11 +714,217 @@ class WOI_Admin_Order_Images {
 			'visible_width'          => $visible_width,
 			'visible_height'         => $visible_height,
 			'wrap_margin'            => $wrap_margin,
+			'is_puzzle'              => $is_puzzle,
+			'puzzle_cols'            => $puzzle_cols,
+			'puzzle_rows'            => $puzzle_rows,
 			'full_width'             => $full_width,
 			'full_height'            => $full_height,
 			'visible_aspect_ratio'   => $visible_height > 0 ? $visible_width / $visible_height : 1,
 			'visible_width_percent'  => $full_width > 0 ? ( $visible_width / $full_width ) * 100 : 100,
 			'visible_height_percent' => $full_height > 0 ? ( $visible_height / $full_height ) * 100 : 100,
 		);
+	}
+
+	private function normalize_crop_rect( $crop, $src_w, $src_h ) {
+		$src_w = max( 1, (int) $src_w );
+		$src_h = max( 1, (int) $src_h );
+
+		if ( ! is_array( $crop ) || empty( $crop['width'] ) || empty( $crop['height'] ) ) {
+			return array(
+				'x' => 0,
+				'y' => 0,
+				'w' => $src_w,
+				'h' => $src_h,
+			);
+		}
+
+		$x = isset( $crop['x'] ) ? (float) $crop['x'] : 0.0;
+		$y = isset( $crop['y'] ) ? (float) $crop['y'] : 0.0;
+		$w = isset( $crop['width'] ) ? (float) $crop['width'] : 0.0;
+		$h = isset( $crop['height'] ) ? (float) $crop['height'] : 0.0;
+
+		$w = max( 1.0, $w );
+		$h = max( 1.0, $h );
+		$x = max( 0.0, $x );
+		$y = max( 0.0, $y );
+
+		$x1 = min( (float) $src_w, $x + $w );
+		$y1 = min( (float) $src_h, $y + $h );
+		$x  = min( $x, $x1 - 1.0 );
+		$y  = min( $y, $y1 - 1.0 );
+		$w  = max( 1.0, $x1 - $x );
+		$h  = max( 1.0, $y1 - $y );
+
+		return array(
+			'x' => (int) round( $x ),
+			'y' => (int) round( $y ),
+			'w' => max( 1, (int) round( $w ) ),
+			'h' => max( 1, (int) round( $h ) ),
+		);
+	}
+
+	private function build_puzzle_tile_data_url( $source_url, $crop, $spec, $col, $row, $cols, $rows ) {
+		$path = $this->url_to_upload_path( $source_url );
+		if ( ! $path || ! is_file( $path ) ) {
+			return '';
+		}
+
+		if ( ! function_exists( 'imagecreatefromstring' ) || ! function_exists( 'imagecreatetruecolor' ) ) {
+			return '';
+		}
+
+		$raw = @file_get_contents( $path );
+		if ( false === $raw || '' === $raw ) {
+			return '';
+		}
+
+		$source = @imagecreatefromstring( $raw );
+		if ( ! $source ) {
+			return '';
+		}
+
+		$src_w = imagesx( $source );
+		$src_h = imagesy( $source );
+		if ( $src_w <= 0 || $src_h <= 0 ) {
+			imagedestroy( $source );
+			return '';
+		}
+
+		$rect = $this->normalize_crop_rect( $crop, $src_w, $src_h );
+		if ( $rect['w'] <= 0 || $rect['h'] <= 0 ) {
+			imagedestroy( $source );
+			return '';
+		}
+
+		$visible_w_px = max( 1, (int) round( $rect['w'] / max( 1, $cols ) ) );
+		$visible_h_px = max( 1, (int) round( $rect['h'] / max( 1, $rows ) ) );
+
+		$visible_width_in  = max( 0.0001, (float) $spec['visible_width'] );
+		$visible_height_in = max( 0.0001, (float) $spec['visible_height'] );
+		$wrap_margin_in    = max( 0, (float) $spec['wrap_margin'] );
+
+		$scale_x = $visible_w_px / $visible_width_in;
+		$scale_y = $visible_h_px / $visible_height_in;
+
+		$bleed_x_px = max( 0, (int) round( $wrap_margin_in * $scale_x ) );
+		$bleed_y_px = max( 0, (int) round( $wrap_margin_in * $scale_y ) );
+
+		$overlap_in = 1 / 16;
+		$overlap_x_px = max( 1, (int) round( $overlap_in * $scale_x ) );
+		$overlap_y_px = max( 1, (int) round( $overlap_in * $scale_y ) );
+
+		$left_overlap   = $col > 0 ? $overlap_x_px : 0;
+		$right_overlap  = $col < ( $cols - 1 ) ? $overlap_x_px : 0;
+		$top_overlap    = $row > 0 ? $overlap_y_px : 0;
+		$bottom_overlap = $row < ( $rows - 1 ) ? $overlap_y_px : 0;
+
+		$src_x0 = $rect['x'] + ( $col * $rect['w'] ) / max( 1, $cols );
+		$src_x1 = $rect['x'] + ( ( $col + 1 ) * $rect['w'] ) / max( 1, $cols );
+		$src_y0 = $rect['y'] + ( $row * $rect['h'] ) / max( 1, $rows );
+		$src_y1 = $rect['y'] + ( ( $row + 1 ) * $rect['h'] ) / max( 1, $rows );
+
+		$full_w_px = $visible_w_px + ( 2 * $bleed_x_px );
+		$full_h_px = $visible_h_px + ( 2 * $bleed_y_px );
+
+		$tile_img = imagecreatetruecolor( $full_w_px, $full_h_px );
+		if ( ! $tile_img ) {
+			imagedestroy( $source );
+			return '';
+		}
+
+		$white = imagecolorallocate( $tile_img, 255, 255, 255 );
+		imagefill( $tile_img, 0, 0, $white );
+
+		$sample_x0 = $src_x0 - $left_overlap;
+		$sample_x1 = $src_x1 + $right_overlap;
+		$sample_y0 = $src_y0 - $top_overlap;
+		$sample_y1 = $src_y1 + $bottom_overlap;
+
+		$sample_x0 = max( 0, $sample_x0 );
+		$sample_y0 = max( 0, $sample_y0 );
+		$sample_x1 = min( $src_w, $sample_x1 );
+		$sample_y1 = min( $src_h, $sample_y1 );
+
+		$sample_w = max( 1, (int) round( $sample_x1 - $sample_x0 ) );
+		$sample_h = max( 1, (int) round( $sample_y1 - $sample_y0 ) );
+
+		imagecopyresampled(
+			$tile_img,
+			$source,
+			$bleed_x_px,
+			$bleed_y_px,
+			(int) round( $sample_x0 ),
+			(int) round( $sample_y0 ),
+			$visible_w_px,
+			$visible_h_px,
+			$sample_w,
+			$sample_h
+		);
+
+		$this->extend_tile_bleed_from_visible( $tile_img, $bleed_x_px, $bleed_y_px, $visible_w_px, $visible_h_px );
+
+		ob_start();
+		imagejpeg( $tile_img, null, 92 );
+		$jpeg = ob_get_clean();
+
+		imagedestroy( $tile_img );
+		imagedestroy( $source );
+
+		if ( empty( $jpeg ) ) {
+			return '';
+		}
+
+		return 'data:image/jpeg;base64,' . base64_encode( $jpeg );
+	}
+
+	private function build_puzzle_segments( $src_start, $src_end, $dest_total, $left_overlap, $right_overlap ) {
+		$segments = array();
+		$cursor = 0;
+
+		if ( $left_overlap > 0 ) {
+			$segments[] = array(
+				'dst_start' => $cursor,
+				'dst_len'   => $left_overlap,
+				'src_start' => $src_start - $left_overlap,
+				'src_len'   => $left_overlap,
+			);
+			$cursor += $left_overlap;
+		}
+
+		$center_len = max( 1, $dest_total - $left_overlap - $right_overlap );
+		$segments[] = array(
+			'dst_start' => $cursor,
+			'dst_len'   => $center_len,
+			'src_start' => $src_start + $left_overlap,
+			'src_len'   => max( 1, ( $src_end - $src_start ) - $left_overlap - $right_overlap ),
+		);
+		$cursor += $center_len;
+
+		if ( $right_overlap > 0 ) {
+			$segments[] = array(
+				'dst_start' => $cursor,
+				'dst_len'   => $right_overlap,
+				'src_start' => $src_end,
+				'src_len'   => $right_overlap,
+			);
+		}
+
+		return $segments;
+	}
+
+	private function extend_tile_bleed_from_visible( $tile_img, $bleed_x, $bleed_y, $visible_w, $visible_h ) {
+		$full_h = imagesy( $tile_img );
+		$vis_x = $bleed_x;
+		$vis_y = $bleed_y;
+
+		if ( $bleed_y > 0 ) {
+			imagecopyresampled( $tile_img, $tile_img, $vis_x, 0, $vis_x, $vis_y, $visible_w, $bleed_y, $visible_w, 1 );
+			imagecopyresampled( $tile_img, $tile_img, $vis_x, $vis_y + $visible_h, $vis_x, $vis_y + $visible_h - 1, $visible_w, $bleed_y, $visible_w, 1 );
+		}
+
+		if ( $bleed_x > 0 ) {
+			imagecopyresampled( $tile_img, $tile_img, 0, 0, $vis_x, 0, $bleed_x, $full_h, 1, $full_h );
+			imagecopyresampled( $tile_img, $tile_img, $vis_x + $visible_w, 0, $vis_x + $visible_w - 1, 0, $bleed_x, $full_h, 1, $full_h );
+		}
 	}
 }

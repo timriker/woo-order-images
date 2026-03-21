@@ -8,11 +8,13 @@ A WooCommerce plugin for managing custom product images in orders. Customers upl
 - **Product Image Upload**: Add photo images to products at add-to-cart stage on product pages
 - **Interactive Crop Modal**: Cropper.js-based interface with zoom slider, rotation, and live preview
 - **Edit Mode**: Pre-loads previously uploaded images if replacing items in cart
+- **Save Once, Crop as Metadata**: Stores source image once and saves crop geometry (x/y/width/height) instead of rewriting cropped files on every edit
 - **Progress Tracking**: "x of y images" labels and visual "Edit Images" links in cart
 - **Validation**: Requires all images before checkout; cart respects image completeness
 
 ### Admin (Backend)
 - **Order-Level Print Sheet**: Opens a full print preview with all order images consolidated onto 8.5×11 pages
+- **Print-Time Crop Application**: Applies saved crop geometry at render time for both single magnets and puzzle tiles
 - **Automatic Packing**: Bin-packs tiles across pages, respecting printer margins (0.25" top/left/right, 0.5" bottom by default)
 - **per-Product Specs**: Each product defines visible area (e.g., 2×2") and wrap margin (bleed area edge distance)
 - **Auto-Orientation**: Detects image landscape/portrait vs. product aspect ratio; swaps template orientation automatically
@@ -80,11 +82,12 @@ A WooCommerce plugin for managing custom product images in orders. Customers upl
 
 ### Print Rendering Pipeline
 
-1. **Collect**: Gather all `_woi_image_urls` from all order items
+1. **Collect**: Gather structured image entries (`url` + `crop`) from order items
 2. **Spec**: Resolve each item's visible area (width/height) and wrap margin
 3. **Orient**: Detect image ratio vs. product aspect; auto-swap orientation if mismatch
-4. **Pack**: Bin-pack tiles left-to-right, then top-to-bottom, respecting page bounds and gaps
-5. **Render**: For each page, output absolute-positioned tiles with:
+4. **Crop**: Apply saved crop geometry to source image at render time
+5. **Pack**: Bin-pack tiles left-to-right, then top-to-bottom, respecting page bounds and gaps
+6. **Render**: For each page, output absolute-positioned tiles with:
    - Visible-area window (centered crop region)
    - Bleed area behind (padded by wrap margin)
    - Watermark bands (positioned in bleed, avoiding visible window)
@@ -92,7 +95,7 @@ A WooCommerce plugin for managing custom product images in orders. Customers upl
 
 ### Asset Organization
 
-- **assets/js/frontend.js**: Cropper.js integration, image rotation (canvas-based bitmap), crop export
+- **assets/js/frontend.js**: Cropper.js integration, image rotation (canvas-based bitmap), crop metadata capture
 - **assets/css/frontend.css**: Modal styles, zoom slider, button layout
 - **assets/css/print-sheet.css**: Print-specific styles, watermark positioning, color preservation hints
 
@@ -105,6 +108,8 @@ A WooCommerce plugin for managing custom product images in orders. Customers upl
 
 ### Key Decisions
 - **Order-level print**: Consolidated output reduces paper waste and print jobs
+- **Canonical source persistence**: Source images are written once; edits update crop metadata only
+- **Development-mode schema agility**: Non-backward-compatible schema updates are acceptable; test/legacy orders can be removed as needed
 - **Per-tile watermark sizing**: `font_pt = wrap_margin × 24`, so labels scale with product bleed
 - **Canvas-based rotation**: Bitmap rotation in frontend (not CSS transform) for accurate crop geometry
 - **Bin-packing algorithm**: Left-to-right rows with gap enforcement, new page when overflow
