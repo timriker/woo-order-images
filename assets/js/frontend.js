@@ -60,6 +60,40 @@
 			cropMaxZoom: null,
 		};
 
+		const normalizeRotation = (rotation) => {
+			const normalized = rotation % 360;
+			return normalized < 0 ? normalized + 360 : normalized;
+		};
+
+		const rotateImageUrl90 = (imageUrl) => new Promise((resolve, reject) => {
+			const image = new Image();
+			image.onload = () => {
+				const canvas = document.createElement('canvas');
+				canvas.width = image.naturalHeight;
+				canvas.height = image.naturalWidth;
+				const ctx = canvas.getContext('2d');
+				if (!ctx) {
+					reject(new Error('Unable to create image context.'));
+					return;
+				}
+
+				ctx.translate(canvas.width / 2, canvas.height / 2);
+				ctx.rotate(Math.PI / 2);
+				ctx.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2);
+
+				canvas.toBlob((blob) => {
+					if (!blob) {
+						reject(new Error('Unable to rotate image.'));
+						return;
+					}
+
+					resolve(URL.createObjectURL(blob));
+				}, 'image/png');
+			};
+			image.onerror = () => reject(new Error('Unable to load image.'));
+			image.src = imageUrl;
+		});
+
 		const syncSliderFromCropper = () => {
 			if (!state.cropper || !zoomSlider || !zoomValue) { return; }
 			const imgData = state.cropper.getImageData();
@@ -130,6 +164,13 @@
 			image.src = fileUrl;
 		});
 
+		const loadImage = (fileUrl) => new Promise((resolve, reject) => {
+			const image = new Image();
+			image.onload = () => resolve(image);
+			image.onerror = () => reject(new Error('Unable to load image for export.'));
+			image.src = fileUrl;
+		});
+
 		const cleanupSlotUrl = (slot) => {
 			if (slot && slot.fileUrl && slot.fileUrl.startsWith('blob:')) {
 				URL.revokeObjectURL(slot.fileUrl);
@@ -145,6 +186,7 @@
 			slot.fileUrl = URL.createObjectURL(file);
 			slot.croppedData = '';
 			slot.orientation = isSquare ? 'square' : await detectImageOrientation(slot.fileUrl);
+			slot.rotation = 0;
 		};
 
 		const getTargetIndexes = (count) => {
@@ -193,6 +235,7 @@
 					fileUrl: '',
 					croppedData: '',
 					orientation: defaultOrientation,
+					rotation: 0,
 				});
 			}
 
@@ -278,6 +321,13 @@
 					);
 					// Max: 4× the initial fitted ratio
 					state.cropMaxZoom = currentRatio * 4;
+
+					// Default to visible-area fit (not full-bleed fit), so bleed stays white
+					// unless the user explicitly zooms in.
+					if (state.cropMinZoom !== null && currentRatio > state.cropMinZoom) {
+						cropper.zoomTo(state.cropMinZoom);
+					}
+
 					syncSliderFromCropper();
 				},
 			});
@@ -375,64 +425,79 @@
 				return;
 			}
 
-			state.cropper.rotate(90);
+			const slot = state.slots[state.activeIndex];
+			rotateImageUrl90(slot.fileUrl)
+				.then(async (rotatedUrl) => {
+					cleanupSlotUrl(slot);
+					slot.fileUrl = rotatedUrl;
+					slot.rotation = 0;
+					openModalForSlot(state.activeIndex);
+				})
+				.catch(() => {
+					window.alert('Unable to rotate this image right now.');
+				});
 		});
 
-		saveCropButton.addEventListener('click', () => {
+		saveCropButton.addEventListener('click', async () => {
 			if (!state.cropper || state.activeIndex < 0 || !state.slots[state.activeIndex]) {
 				return;
 			}
 
-			// Export visible area first
+			// Expand the visible crop into bleed using direct pixel math.
+			// This preserves source-image overflow where available and keeps true
+			// white tabs where the source image does not exist.
 			const geo = state.cropGeometry;
 			const visibleData = state.cropper.getData(true);
 			const bleedFracX = (100 / geo.visibleWidthPercent - 1) / 2;
 			const bleedFracY = (100 / geo.visibleHeightPercent - 1) / 2;
-			const bW = Math.round(visibleData.width * bleedFracX);
-			const bH = Math.round(visibleData.height * bleedFracY);
+				const bW = visibleData.width * bleedFracX;
+				const bH = visibleData.height * bleedFracY;
 
-			state.cropper.setData({
-				x: visibleData.x - bW,
-				y: visibleData.y - bH,
-				width: visibleData.width + 2 * bW,
-				height: visibleData.height + 2 * bH,
-				rotate: visibleData.rotate,
-				scaleX: visibleData.scaleX,
-				scaleY: visibleData.scaleY,
-			});
-			const canvas = state.cropper.getCroppedCanvas({
-				fillColor: '#ffffff',
-				imageSmoothingEnabled: true,
-				imageSmoothingQuality: 'high',
-			});
+			const exportX = visibleData.x - bW;
+			const exportY = visibleData.y - bH;
+			const exportW = visibleData.width + (2 * bW);
+			const exportH = visibleData.height + (2 * bH);
 
-			if (!canvas) {
+			const finalWidth = Math.max(1, Math.round(exportW));
+			const finalHeight = Math.max(1, Math.round(exportH));
+			const canvas = document.createElement('canvas');
+			canvas.width = finalWidth;
+			canvas.height = finalHeight;
+
+			const ctx = canvas.getContext('2d');
+			if (!ctx) {
 				return;
 			}
 
-			// Ensure exported canvas has the correct full bleed aspect ratio
-			// to prevent uneven scaling on the print sheet
-			const naturalAspect = canvas.width / canvas.height;
-			const targetAspect = geo.cropAspect;
+			ctx.fillStyle = '#ffffff';
+			ctx.fillRect(0, 0, finalWidth, finalHeight);
 
-			let finalCanvas = canvas;
-			if (Math.abs(naturalAspect - targetAspect) > 0.01) {
-				// Resize canvas to match target aspect, keeping width and adjusting height
-				const targetHeight = Math.round(canvas.width / targetAspect);
-				finalCanvas = document.createElement('canvas');
-				finalCanvas.width = canvas.width;
-				finalCanvas.height = targetHeight;
-
-				const ctx = finalCanvas.getContext('2d');
-				ctx.fillStyle = '#ffffff';
-				ctx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
-
-				// Center the exported content vertically
-				const yOffset = (targetHeight - canvas.height) / 2;
-				ctx.drawImage(canvas, 0, yOffset);
+			const slot = state.slots[state.activeIndex];
+			if (!slot.fileUrl) {
+				return;
 			}
 
-			state.slots[state.activeIndex].croppedData = finalCanvas.toDataURL('image/jpeg', 0.92);
+			try {
+				const sourceImage = await loadImage(slot.fileUrl);
+
+				const srcX = Math.max(0, exportX);
+				const srcY = Math.max(0, exportY);
+				const srcRight = Math.min(sourceImage.naturalWidth, exportX + exportW);
+				const srcBottom = Math.min(sourceImage.naturalHeight, exportY + exportH);
+				const srcW = Math.max(0, srcRight - srcX);
+				const srcH = Math.max(0, srcBottom - srcY);
+
+				if (srcW > 0 && srcH > 0) {
+					const destX = srcX - exportX;
+					const destY = srcY - exportY;
+					ctx.drawImage(sourceImage, srcX, srcY, srcW, srcH, destX, destY, srcW, srcH);
+				}
+			} catch (error) {
+				window.alert('Unable to save crop right now. Please try again.');
+				return;
+			}
+
+			state.slots[state.activeIndex].croppedData = canvas.toDataURL('image/jpeg', 0.92);
 			renderSlots();
 			updateRequirementText();
 			closeModal();
@@ -511,6 +576,7 @@
 				state.slots[index].fileUrl = imageUrl;
 				state.slots[index].croppedData = imageUrl;
 				state.slots[index].orientation = isSquare ? 'square' : await detectImageOrientation(imageUrl);
+				state.slots[index].rotation = 0;
 			}
 
 			renderSlots();
