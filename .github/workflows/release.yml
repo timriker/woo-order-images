@@ -7,7 +7,7 @@ on:
 
 permissions:
   contents: write
-  
+
 jobs:
   create-release:
     runs-on: ubuntu-latest
@@ -39,15 +39,15 @@ jobs:
           name: WOO Order Images v${{ steps.tag_version.outputs.VERSION }}
           body: |
             ## WOO Order Images v${{ steps.tag_version.outputs.VERSION }}
-            
+
             Download `woo-order-images-${{ steps.tag_version.outputs.VERSION }}.zip` below to install on your WordPress site.
-            
+
             **Installation:**
             1. Download the .zip file
             2. Go to WordPress Admin → Plugins → Add New
             3. Click "Upload Plugin" and select the .zip file
             4. Click "Install Now" then "Activate Plugin"
-            
+
             **Configuration:**
             - Visit WooCommerce → Order Images to configure settings
             - Set per-product image requirements in each product's "Woo Order Images" tab
