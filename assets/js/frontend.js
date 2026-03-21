@@ -65,6 +65,12 @@
 			return normalized < 0 ? normalized + 360 : normalized;
 		};
 
+		/**
+		 * Rotate an image 90 degrees clockwise using canvas bitmap rotation.
+		 * Creates a new blob URL with the rotated result.
+		 * @param {string} imageUrl - URL of the image to rotate
+		 * @returns {Promise<string>} Blob URL of the rotated image
+		 */
 		const rotateImageUrl90 = (imageUrl) => new Promise((resolve, reject) => {
 			const image = new Image();
 			image.onload = () => {
@@ -164,6 +170,11 @@
 			image.src = fileUrl;
 		});
 
+		/**
+		 * Load an image from URL and return the loaded Image object.
+		 * @param {string} fileUrl - URL of the image to load
+		 * @returns {Promise<Image>} Loaded Image object with naturalWidth/naturalHeight
+		 */
 		const loadImage = (fileUrl) => new Promise((resolve, reject) => {
 			const image = new Image();
 			image.onload = () => resolve(image);
@@ -171,6 +182,10 @@
 			image.src = fileUrl;
 		});
 
+		/**
+		 * Revoke blob URLs to prevent memory leaks.
+		 * @param {Object} slot - Upload slot object containing fileUrl
+		 */
 		const cleanupSlotUrl = (slot) => {
 			if (slot && slot.fileUrl && slot.fileUrl.startsWith('blob:')) {
 				URL.revokeObjectURL(slot.fileUrl);
@@ -448,11 +463,19 @@
 			// white tabs where the source image does not exist.
 			const geo = state.cropGeometry;
 			const visibleData = state.cropper.getData(true);
+
+			// Calculate bleed expansion as a fraction of visible area.
+			// If visible area = x% of total, then bleed on each side = (100 - x) / 2 % of total.
+			// Convert to ratio: (100 / visible% - 1) / 2 gives the fraction to expand by.
+			// Example: visible=80% → (100/80 - 1)/2 = 0.125 (expand by 12.5% on each side).
 			const bleedFracX = (100 / geo.visibleWidthPercent - 1) / 2;
 			const bleedFracY = (100 / geo.visibleHeightPercent - 1) / 2;
-				const bW = visibleData.width * bleedFracX;
-				const bH = visibleData.height * bleedFracY;
 
+			// Convert fraction into pixel expansion.
+			const bW = visibleData.width * bleedFracX;
+			const bH = visibleData.height * bleedFracY;
+
+			// Expand crop rectangle to include bleed.
 			const exportX = visibleData.x - bW;
 			const exportY = visibleData.y - bH;
 			const exportW = visibleData.width + (2 * bW);
@@ -469,6 +492,7 @@
 				return;
 			}
 
+			// Fill entire canvas with white (fallback for areas outside source image).
 			ctx.fillStyle = '#ffffff';
 			ctx.fillRect(0, 0, finalWidth, finalHeight);
 
@@ -480,6 +504,8 @@
 			try {
 				const sourceImage = await loadImage(slot.fileUrl);
 
+				// Clip the source image to the requested export region, clamping to image bounds.
+				// If export rect extends beyond image, nothing is drawn (white background shows).
 				const srcX = Math.max(0, exportX);
 				const srcY = Math.max(0, exportY);
 				const srcRight = Math.min(sourceImage.naturalWidth, exportX + exportW);

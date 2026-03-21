@@ -1,24 +1,163 @@
-*{box-sizing:border-box;}
-html,body{margin:0;padding:0;background:#fff;}
-body{font-family:Arial,sans-serif;color:#111;padding:0.2in;}
-.woi-sheet-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0.12in;align-items:start;}
-.woi-tile{position:relative;}
-.woi-bleed{position:relative;overflow:hidden;background:#fff;}
-.woi-visible-window{position:absolute;overflow:hidden;z-index:1;}
-.woi-visible-window img{position:absolute;display:block;max-width:none;max-height:none;}
-.woi-cut-outline{position:absolute;inset:0;pointer-events:none;z-index:4;}
-.woi-cut-outline svg{display:block;width:100%;height:100%;}
-.woi-watermark-band{position:absolute;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:2;overflow:hidden;}
-.woi-watermark-band span{line-height:1.1;color:rgba(0,0,0,0.65);white-space:nowrap;letter-spacing:0.02em;background:rgba(255,255,255,0.88);padding:2px 8px;border-radius:2px;}
-.woi-watermark-top span{transform:rotate(180deg);}
-.woi-watermark-bottom span{transform:rotate(180deg);}
-.woi-watermark-left span,.woi-watermark-right span{position:absolute;top:50%;transform:translate(-50%,-50%) rotate(-90deg);padding:1px 2px;line-height:1;}
-.woi-watermark-left span{left:62.5%;}
-.woi-watermark-right span{left:37.5%;}
-.woi-watermark-top{align-items:flex-end;padding-bottom:2px;}
-.woi-watermark-bottom{align-items:flex-start;padding-top:2px;}
-.woi-watermark-left,.woi-watermark-right{position:absolute;overflow:hidden;}
-.woi-watermark-left{justify-content:center;padding-right:0;}
-.woi-watermark-right{justify-content:center;padding-left:0;}
-@page{size:8.5in 11in;}
-@media print{*{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}html,body{margin:0;padding:0;background:#fff;}.woi-sheet-grid{gap:0.1in;}}
+/* Reset and base styles */
+* {
+	box-sizing: border-box;
+}
+
+html, body {
+	margin: 0;
+	padding: 0;
+	background: #fff;
+}
+
+body {
+	font-family: Arial, sans-serif;
+	color: #111;
+	padding: 0.2in;
+}
+
+/* Print sheet grid layout */
+.woi-sheet-grid {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 0.12in;
+	align-items: start;
+}
+
+/* Individual tile */
+.woi-tile {
+	position: relative;
+}
+
+/* Bleed area (wrap margin beyond visible area) */
+.woi-bleed {
+	position: relative;
+	overflow: hidden;
+	background: #fff;
+}
+
+/* Visible window (the actual product area) */
+.woi-visible-window {
+	position: absolute;
+	overflow: hidden;
+	z-index: 1;
+}
+
+.woi-visible-window img {
+	position: absolute;
+	display: block;
+	max-width: none;
+	max-height: none;
+}
+
+/* Cut outline (die-cut polygon) */
+.woi-cut-outline {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	z-index: 4;
+}
+
+.woi-cut-outline svg {
+	display: block;
+	width: 100%;
+	height: 100%;
+}
+
+/* Watermark band base styles */
+.woi-watermark-band {
+	position: absolute;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	pointer-events: none;
+	z-index: 2;
+	overflow: hidden;
+}
+
+.woi-watermark-band span {
+	line-height: 1.1;
+	color: rgba(0, 0, 0, 0.65);
+	white-space: nowrap;
+	letter-spacing: 0.02em;
+	background: rgba(255, 255, 255, 0.88);
+	padding: 2px 8px;
+	border-radius: 2px;
+}
+
+/* Top and bottom watermarks: flip text 180 degrees */
+.woi-watermark-top span {
+	transform: rotate(180deg);
+}
+
+.woi-watermark-bottom span {
+	transform: rotate(180deg);
+}
+
+/* Left and right watermarks: rotate 90 degrees counterclockwise */
+.woi-watermark-left span,
+.woi-watermark-right span {
+	position: absolute;
+	top: 50%;
+	transform: translate(-50%, -50%) rotate(-90deg);
+	padding: 1px 2px;
+	line-height: 1;
+}
+
+.woi-watermark-left span {
+	left: 62.5%;
+}
+
+.woi-watermark-right span {
+	left: 37.5%;
+}
+
+/* Top and bottom band positioning */
+.woi-watermark-top {
+	align-items: flex-end;
+	padding-bottom: 2px;
+}
+
+.woi-watermark-bottom {
+	align-items: flex-start;
+	padding-top: 2px;
+}
+
+/* Left and right band container styles */
+.woi-watermark-left,
+.woi-watermark-right {
+	position: absolute;
+	overflow: hidden;
+}
+
+.woi-watermark-left {
+	justify-content: center;
+	padding-right: 0;
+}
+
+.woi-watermark-right {
+	justify-content: center;
+	padding-left: 0;
+}
+
+/* Page settings and print media queries */
+@page {
+	size: 8.5in 11in;
+}
+
+@media print {
+	/* Preserve exact colors during printing */
+	* {
+		-webkit-print-color-adjust: exact !important;
+		print-color-adjust: exact !important;
+	}
+
+	html, body {
+		margin: 0;
+		padding: 0;
+		background: #fff;
+	}
+
+	.woi-sheet-grid {
+		gap: 0.1in;
+	}
+}

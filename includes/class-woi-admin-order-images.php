@@ -138,12 +138,15 @@ class WOI_Admin_Order_Images {
 		$margin_right   = WOI_Settings::get_print_margin_right();
 		$margin_bottom  = WOI_Settings::get_print_margin_bottom();
 		$margin_left    = WOI_Settings::get_print_margin_left();
+		$gap            = WOI_Settings::get_print_gap();
 
-		// Printable area: 8.5in paper - left/right margins = width;
-		// 11in paper - top/bottom margins = height.
-		$page_width     = 8.5 - $margin_left - $margin_right;
-		$page_height    = 11.0 - $margin_top - $margin_bottom;
-		$gap         = 0.125;
+		// Get page dimensions from settings, calculate printable area.
+		$page_size_key  = WOI_Settings::get_print_page_size();
+		$page_dims      = WOI_Settings::get_page_size_dimensions( $page_size_key );
+		$full_page_w    = $page_dims['width'];
+		$full_page_h    = $page_dims['height'];
+		$page_width     = $full_page_w - $margin_left - $margin_right;
+		$page_height    = $full_page_h - $margin_top - $margin_bottom;
 
 		$pages       = array();
 		$current     = array();
@@ -237,7 +240,7 @@ class WOI_Admin_Order_Images {
 		echo '<style>';
 		echo '@page{';
 		echo 'margin:' . esc_attr( $margin_top ) . 'in ' . esc_attr( $margin_right ) . 'in ' . esc_attr( $margin_bottom ) . 'in ' . esc_attr( $margin_left ) . 'in;';
-		echo 'size:8.5in 11in;';
+		echo 'size:' . esc_attr( $this->format_num( $full_page_w ) ) . 'in ' . esc_attr( $this->format_num( $full_page_h ) ) . 'in;';
 		echo '-webkit-print-color-adjust:exact !important;';
 		echo 'print-color-adjust:exact !important;';
 		echo '}';
