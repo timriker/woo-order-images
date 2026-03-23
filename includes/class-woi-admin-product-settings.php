@@ -229,12 +229,12 @@ class WOI_Admin_Product_Settings {
 			? sprintf(
 				'%1$s-%2$s',
 				$this->format_admin_dimension_pair( $puzzle_cols, $puzzle_rows, false ),
-				$this->format_admin_dimension_pair( $visible_width, $visible_height, true )
+				$this->format_admin_dimension_pair( $visible_width, $visible_height, false )
 			)
 			: sprintf(
 				'%1$d-%2$s',
 				$required_count,
-				$this->format_admin_dimension_pair( $visible_width, $visible_height, true )
+				$this->format_admin_dimension_pair( $visible_width, $visible_height, false )
 			);
 
 		echo '<a class="woi-admin-badge-link" href="' . esc_url( $settings_url ) . '" title="' . esc_attr__( 'Open Woo Order Images settings for this product', 'woo-order-images' ) . '"><span class="woi-admin-badge' . ( $puzzle_enabled ? ' woi-admin-badge--puzzle' : '' ) . '">' . esc_html( $badge_text ) . '</span></a>';
