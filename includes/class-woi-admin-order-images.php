@@ -558,6 +558,9 @@ class WOI_Admin_Order_Images {
 			return '';
 		}
 
+		$target_aspect = max( 0.0001, (float) $spec['visible_width'] / max( 0.0001, (float) $spec['visible_height'] ) );
+		$rect          = $this->fit_crop_rect_to_aspect_ratio( $rect, $target_aspect, $src_w, $src_h );
+
 		$visible_w_px = max( 1, (int) round( $rect['w'] ) );
 		$visible_h_px = max( 1, (int) round( $rect['h'] ) );
 
@@ -815,6 +818,42 @@ class WOI_Admin_Order_Images {
 		);
 	}
 
+	private function fit_crop_rect_to_aspect_ratio( $rect, $target_aspect, $src_w, $src_h ) {
+		$target_aspect = (float) $target_aspect;
+		if ( $target_aspect <= 0 || empty( $rect['w'] ) || empty( $rect['h'] ) ) {
+			return $rect;
+		}
+
+		$current_aspect = (float) $rect['w'] / max( 0.0001, (float) $rect['h'] );
+		if ( abs( $current_aspect - $target_aspect ) < 0.0001 ) {
+			return $rect;
+		}
+
+		$adjusted = $rect;
+
+		if ( $current_aspect > $target_aspect ) {
+			$new_width      = max( 1.0, (float) $rect['h'] * $target_aspect );
+			$adjusted['x'] += ( (float) $rect['w'] - $new_width ) / 2;
+			$adjusted['w']  = $new_width;
+		} else {
+			$new_height     = max( 1.0, (float) $rect['w'] / $target_aspect );
+			$adjusted['y'] += ( (float) $rect['h'] - $new_height ) / 2;
+			$adjusted['h']  = $new_height;
+		}
+
+		$adjusted['w'] = min( (float) $adjusted['w'], (float) $src_w );
+		$adjusted['h'] = min( (float) $adjusted['h'], (float) $src_h );
+		$adjusted['x'] = max( 0.0, min( (float) $adjusted['x'], max( 0.0, (float) $src_w - (float) $adjusted['w'] ) ) );
+		$adjusted['y'] = max( 0.0, min( (float) $adjusted['y'], max( 0.0, (float) $src_h - (float) $adjusted['h'] ) ) );
+
+		return array(
+			'x' => (int) round( $adjusted['x'] ),
+			'y' => (int) round( $adjusted['y'] ),
+			'w' => max( 1, (int) round( $adjusted['w'] ) ),
+			'h' => max( 1, (int) round( $adjusted['h'] ) ),
+		);
+	}
+
 	private function build_puzzle_tile_data_url( $source_url, $crop, $spec, $col, $row, $cols, $rows ) {
 		$path = $this->url_to_upload_path( $source_url );
 		if ( ! $path || ! is_file( $path ) ) {
@@ -847,6 +886,9 @@ class WOI_Admin_Order_Images {
 			imagedestroy( $source );
 			return '';
 		}
+
+		$target_aspect = ( max( 1, (int) $cols ) * max( 0.0001, (float) $spec['visible_width'] ) ) / ( max( 1, (int) $rows ) * max( 0.0001, (float) $spec['visible_height'] ) );
+		$rect          = $this->fit_crop_rect_to_aspect_ratio( $rect, $target_aspect, $src_w, $src_h );
 
 		$visible_w_px = max( 1, (int) round( $rect['w'] / max( 1, $cols ) ) );
 		$visible_h_px = max( 1, (int) round( $rect['h'] / max( 1, $rows ) ) );
