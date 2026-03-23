@@ -18,7 +18,10 @@ class WOI_Admin_Product_Settings {
 		add_action( 'woocommerce_product_data_panels', array( $this, 'render_panel' ) );
 		add_action( 'woocommerce_process_product_meta', array( $this, 'save' ) );
 		add_filter( 'manage_edit-product_columns', array( $this, 'add_product_list_column' ), 20 );
+		add_filter( 'manage_edit-product_sortable_columns', array( $this, 'add_sortable_product_list_column' ) );
 		add_action( 'manage_product_posts_custom_column', array( $this, 'render_product_list_column' ), 10, 2 );
+		add_action( 'pre_get_posts', array( $this, 'prepare_product_list_sort' ) );
+		add_filter( 'posts_clauses', array( $this, 'apply_product_list_sort_clauses' ), 10, 2 );
 		add_action( 'admin_head', array( $this, 'print_product_list_styles' ) );
 	}
 
@@ -183,12 +186,12 @@ class WOI_Admin_Product_Settings {
 			$updated[ $key ] = $label;
 
 			if ( 'name' === $key ) {
-				$updated['woi_order_images'] = __( 'Order Images', 'woo-order-images' );
+				$updated['woi_order_images'] = '<span title="' . esc_attr__( 'Woo Order Images', 'woo-order-images' ) . '">' . esc_html__( 'WOI', 'woo-order-images' ) . '</span>';
 			}
 		}
 
 		if ( ! isset( $updated['woi_order_images'] ) ) {
-			$updated['woi_order_images'] = __( 'Order Images', 'woo-order-images' );
+			$updated['woi_order_images'] = '<span title="' . esc_attr__( 'Woo Order Images', 'woo-order-images' ) . '">' . esc_html__( 'WOI', 'woo-order-images' ) . '</span>';
 		}
 
 		return $updated;
@@ -208,12 +211,76 @@ class WOI_Admin_Product_Settings {
 		$puzzle_enabled = 'yes' === get_post_meta( $post_id, self::META_PUZZLE_ENABLED, true );
 		$puzzle_cols    = max( 1, (int) get_post_meta( $post_id, self::META_PUZZLE_COLS, true ) );
 		$puzzle_rows    = max( 1, (int) get_post_meta( $post_id, self::META_PUZZLE_ROWS, true ) );
+		$required_count = max( 1, (int) get_post_meta( $post_id, self::META_REQUIRED_COUNT, true ) );
+		$visible_width  = self::get_meta_float( $post_id, self::META_VISIBLE_WIDTH, 2.0 );
+		$visible_height = self::get_meta_float( $post_id, self::META_VISIBLE_HEIGHT, 2.0 );
 
-		echo '<span class="woi-admin-badge">' . esc_html__( 'Images Enabled', 'woo-order-images' ) . '</span>';
+		$badge_text = $puzzle_enabled
+			? sprintf(
+				'%1$s-%2$s',
+				$this->format_admin_dimension_pair( $puzzle_cols, $puzzle_rows, false ),
+				$this->format_admin_dimension_pair( $visible_width, $visible_height, true )
+			)
+			: sprintf(
+				'%1$d-%2$s',
+				$required_count,
+				$this->format_admin_dimension_pair( $visible_width, $visible_height, true )
+			);
 
-		if ( $puzzle_enabled ) {
-			echo ' <span class="woi-admin-badge woi-admin-badge--puzzle">' . esc_html( sprintf( __( 'Puzzle %1$d×%2$d', 'woo-order-images' ), $puzzle_cols, $puzzle_rows ) ) . '</span>';
+		echo '<span class="woi-admin-badge' . ( $puzzle_enabled ? ' woi-admin-badge--puzzle' : '' ) . '">' . esc_html( $badge_text ) . '</span>';
+	}
+
+	public function add_sortable_product_list_column( $columns ) {
+		$columns['woi_order_images'] = 'woi_order_images';
+
+		return $columns;
+	}
+
+	public function prepare_product_list_sort( $query ) {
+		if ( ! $query instanceof WP_Query || ! is_admin() || ! $query->is_main_query() ) {
+			return;
 		}
+
+		if ( 'product' !== $query->get( 'post_type' ) ) {
+			return;
+		}
+
+		if ( 'woi_order_images' !== $query->get( 'orderby' ) ) {
+			return;
+		}
+
+		$query->set( 'woi_sort_order_images', true );
+	}
+
+	public function apply_product_list_sort_clauses( $clauses, $query ) {
+		if ( ! $query instanceof WP_Query || ! $query->get( 'woi_sort_order_images' ) ) {
+			return $clauses;
+		}
+
+		global $wpdb;
+
+		$order = 'DESC' === strtoupper( (string) $query->get( 'order' ) ) ? 'DESC' : 'ASC';
+
+		$enabled_join = " LEFT JOIN {$wpdb->postmeta} AS woi_enabled_pm ON ({$wpdb->posts}.ID = woi_enabled_pm.post_id AND woi_enabled_pm.meta_key = '" . esc_sql( self::META_ENABLED ) . "')";
+		$puzzle_join  = " LEFT JOIN {$wpdb->postmeta} AS woi_puzzle_pm ON ({$wpdb->posts}.ID = woi_puzzle_pm.post_id AND woi_puzzle_pm.meta_key = '" . esc_sql( self::META_PUZZLE_ENABLED ) . "')";
+
+		if ( false === strpos( $clauses['join'], 'woi_enabled_pm' ) ) {
+			$clauses['join'] .= $enabled_join;
+		}
+
+		if ( false === strpos( $clauses['join'], 'woi_puzzle_pm' ) ) {
+			$clauses['join'] .= $puzzle_join;
+		}
+
+		if ( 'ASC' === $order ) {
+			$sort_order = "CASE WHEN woi_enabled_pm.meta_value = 'yes' THEN 0 ELSE 1 END ASC, CASE WHEN woi_enabled_pm.meta_value = 'yes' AND woi_puzzle_pm.meta_value = 'yes' THEN 1 WHEN woi_enabled_pm.meta_value = 'yes' THEN 0 ELSE 2 END ASC";
+		} else {
+			$sort_order = "CASE WHEN woi_enabled_pm.meta_value = 'yes' THEN 1 ELSE 0 END ASC, CASE WHEN woi_enabled_pm.meta_value = 'yes' AND woi_puzzle_pm.meta_value = 'yes' THEN 0 WHEN woi_enabled_pm.meta_value = 'yes' THEN 1 ELSE 2 END ASC";
+		}
+
+		$clauses['orderby'] = $sort_order . ", {$wpdb->posts}.post_title ASC";
+
+		return $clauses;
 	}
 
 	public function print_product_list_styles() {
@@ -284,5 +351,26 @@ class WOI_Admin_Product_Settings {
 		}
 
 		return (float) $value;
+	}
+
+	private function format_admin_dimension_pair( $width, $height, $round_up = false ) {
+		return sprintf(
+			'%1$sx%2$s',
+			$this->format_admin_dimension_value( $width, $round_up ),
+			$this->format_admin_dimension_value( $height, $round_up )
+		);
+	}
+
+	private function format_admin_dimension_value( $value, $round_up = false ) {
+		$value = (float) $value;
+		if ( $round_up ) {
+			return (string) max( 1, (int) ceil( $value ) );
+		}
+
+		if ( abs( $value - round( $value ) ) < 0.001 ) {
+			return (string) (int) round( $value );
+		}
+
+		return rtrim( rtrim( number_format( $value, 2, '.', '' ), '0' ), '.' );
 	}
 }
