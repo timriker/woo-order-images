@@ -203,9 +203,18 @@ class WOI_Admin_Product_Settings {
 			return;
 		}
 
+		$settings_url = add_query_arg(
+			array(
+				'post'    => $post_id,
+				'action'  => 'edit',
+				'woi_tab' => 1,
+			),
+			admin_url( 'post.php' )
+		) . '#woi_order_images_panel';
+
 		$enabled = 'yes' === get_post_meta( $post_id, self::META_ENABLED, true );
 		if ( ! $enabled ) {
-			echo '<span aria-hidden="true">&mdash;</span>';
+			echo '<a class="woi-admin-empty-link" href="' . esc_url( $settings_url ) . '" title="' . esc_attr__( 'Open Woo Order Images settings for this product', 'woo-order-images' ) . '"><span aria-hidden="true">&mdash;</span><span class="screen-reader-text">' . esc_html__( 'Open Woo Order Images settings', 'woo-order-images' ) . '</span></a>';
 			return;
 		}
 
@@ -227,15 +236,6 @@ class WOI_Admin_Product_Settings {
 				$required_count,
 				$this->format_admin_dimension_pair( $visible_width, $visible_height, true )
 			);
-
-		$settings_url = add_query_arg(
-			array(
-				'post'     => $post_id,
-				'action'   => 'edit',
-				'woi_tab'  => 1,
-			),
-			admin_url( 'post.php' )
-		) . '#woi_order_images_panel';
 
 		echo '<a class="woi-admin-badge-link" href="' . esc_url( $settings_url ) . '" title="' . esc_attr__( 'Open Woo Order Images settings for this product', 'woo-order-images' ) . '"><span class="woi-admin-badge' . ( $puzzle_enabled ? ' woi-admin-badge--puzzle' : '' ) . '">' . esc_html( $badge_text ) . '</span></a>';
 	}
@@ -321,7 +321,18 @@ class WOI_Admin_Product_Settings {
 				text-decoration: none;
 			}
 
+			.woi-admin-empty-link {
+				display: inline-block;
+				color: inherit;
+				text-decoration: none;
+			}
+
 			.woi-admin-badge-link:focus {
+				outline: none;
+				box-shadow: none;
+			}
+
+			.woi-admin-empty-link:focus {
 				outline: none;
 				box-shadow: none;
 			}
@@ -329,6 +340,11 @@ class WOI_Admin_Product_Settings {
 			.woi-admin-badge-link:hover .woi-admin-badge,
 			.woi-admin-badge-link:focus .woi-admin-badge {
 				filter: brightness(0.97);
+				text-decoration: underline;
+			}
+
+			.woi-admin-empty-link:hover,
+			.woi-admin-empty-link:focus {
 				text-decoration: underline;
 			}
 
