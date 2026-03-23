@@ -23,6 +23,7 @@ class WOI_Admin_Product_Settings {
 		add_action( 'pre_get_posts', array( $this, 'prepare_product_list_sort' ) );
 		add_filter( 'posts_clauses', array( $this, 'apply_product_list_sort_clauses' ), 10, 2 );
 		add_action( 'admin_head', array( $this, 'print_product_list_styles' ) );
+		add_action( 'admin_footer', array( $this, 'print_product_edit_tab_script' ) );
 	}
 
 	public function add_tab( $tabs ) {
@@ -227,7 +228,16 @@ class WOI_Admin_Product_Settings {
 				$this->format_admin_dimension_pair( $visible_width, $visible_height, true )
 			);
 
-		echo '<span class="woi-admin-badge' . ( $puzzle_enabled ? ' woi-admin-badge--puzzle' : '' ) . '">' . esc_html( $badge_text ) . '</span>';
+		$settings_url = add_query_arg(
+			array(
+				'post'     => $post_id,
+				'action'   => 'edit',
+				'woi_tab'  => 1,
+			),
+			admin_url( 'post.php' )
+		) . '#woi_order_images_panel';
+
+		echo '<a class="woi-admin-badge-link" href="' . esc_url( $settings_url ) . '" title="' . esc_attr__( 'Open Woo Order Images settings for this product', 'woo-order-images' ) . '"><span class="woi-admin-badge' . ( $puzzle_enabled ? ' woi-admin-badge--puzzle' : '' ) . '">' . esc_html( $badge_text ) . '</span></a>';
 	}
 
 	public function add_sortable_product_list_column( $columns ) {
@@ -306,11 +316,85 @@ class WOI_Admin_Product_Settings {
 				white-space: nowrap;
 			}
 
+			.woi-admin-badge-link {
+				display: inline-block;
+				text-decoration: none;
+			}
+
+			.woi-admin-badge-link:focus {
+				outline: none;
+				box-shadow: none;
+			}
+
+			.woi-admin-badge-link:hover .woi-admin-badge,
+			.woi-admin-badge-link:focus .woi-admin-badge {
+				filter: brightness(0.97);
+				text-decoration: underline;
+			}
+
 			.woi-admin-badge--puzzle {
 				background: #eef2ff;
 				color: #1e3a8a;
 			}
 		</style>
+		<?php
+	}
+
+	public function print_product_edit_tab_script() {
+		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
+		if ( ! $screen || 'product' !== $screen->id ) {
+			return;
+		}
+
+		if ( ! isset( $_GET['woi_tab'] ) ) {
+			return;
+		}
+		?>
+		<script>
+			(function () {
+				const activateWoiTab = () => {
+					const tabLink = document.querySelector('.product_data_tabs a[href="#woi_order_images_panel"]');
+					const tabItem = tabLink ? tabLink.closest('li') : null;
+					const panel = document.getElementById('woi_order_images_panel');
+					if (!tabLink || !tabItem || !panel) {
+						return false;
+					}
+
+					document.querySelectorAll('.product_data_tabs li').forEach((item) => {
+						item.classList.remove('active');
+					});
+					document.querySelectorAll('.woocommerce_options_panel').forEach((item) => {
+						item.classList.add('hidden');
+					});
+
+					tabItem.classList.add('active');
+					panel.classList.remove('hidden');
+
+					if (window.jQuery) {
+						window.jQuery(tabLink).trigger('click');
+					}
+
+					if (window.location.hash !== '#woi_order_images_panel') {
+						window.location.hash = 'woi_order_images_panel';
+					}
+
+					panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+					return true;
+				};
+
+				const run = () => {
+					if (activateWoiTab()) {
+						window.setTimeout(activateWoiTab, 150);
+					}
+				};
+
+				if (document.readyState === 'loading') {
+					document.addEventListener('DOMContentLoaded', run);
+				} else {
+					run();
+				}
+			}());
+		</script>
 		<?php
 	}
 
