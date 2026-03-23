@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Woo Order Images
  * Description: Collects customer image uploads for WooCommerce products and generates order print sheets, including puzzle layouts.
- * Version: 0.4.0
+ * Version: 0.5.1
  * Requires at least: 6.8
  * Requires PHP: 7.4
  * Requires Plugins: woocommerce
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 if ( ! defined( 'WOI_VERSION' ) ) {
-	define( 'WOI_VERSION', '0.4.0' );
+	define( 'WOI_VERSION', '0.5.1' );
 }
 
 if ( ! defined( 'WOI_PLUGIN_FILE' ) ) {
