@@ -9,7 +9,6 @@ class WOI_Admin_Product_Settings {
 	const META_REQUIRED_COUNT = '_woi_required_image_count';
 	const META_VISIBLE_WIDTH  = '_woi_visible_width';
 	const META_VISIBLE_HEIGHT = '_woi_visible_height';
-	const META_WRAP_MARGIN    = '_woi_wrap_margin';
 	const META_PUZZLE_ENABLED = '_woi_puzzle_enabled';
 	const META_PUZZLE_COLS    = '_woi_puzzle_cols';
 	const META_PUZZLE_ROWS    = '_woi_puzzle_rows';
@@ -39,7 +38,6 @@ class WOI_Admin_Product_Settings {
 		$required_count = '' === $required_count ? 1 : (int) $required_count;
 		$visible_width  = self::get_meta_float( $post->ID, self::META_VISIBLE_WIDTH, 2.0 );
 		$visible_height = self::get_meta_float( $post->ID, self::META_VISIBLE_HEIGHT, 2.0 );
-		$wrap_margin    = self::get_meta_float( $post->ID, self::META_WRAP_MARGIN, 0.25 );
 		$puzzle_enabled = get_post_meta( $post->ID, self::META_PUZZLE_ENABLED, true );
 		$puzzle_cols    = get_post_meta( $post->ID, self::META_PUZZLE_COLS, true );
 		$puzzle_rows    = get_post_meta( $post->ID, self::META_PUZZLE_ROWS, true );
@@ -103,21 +101,6 @@ class WOI_Admin_Product_Settings {
 					)
 				);
 
-				woocommerce_wp_text_input(
-					array(
-						'id'                => self::META_WRAP_MARGIN,
-						'label'             => __( 'Bleed area (wrap margin, inches)', 'woo-order-images' ),
-						'description'       => __( 'Extra bleed area outside the visible area on all sides. This becomes the wrapping flaps.', 'woo-order-images' ),
-						'desc_tip'          => true,
-						'type'              => 'number',
-						'custom_attributes' => array(
-							'min'  => 0,
-							'step' => 0.01,
-						),
-						'value'             => $wrap_margin,
-					)
-				);
-
 				woocommerce_wp_checkbox(
 					array(
 						'id'          => self::META_PUZZLE_ENABLED,
@@ -178,10 +161,6 @@ class WOI_Admin_Product_Settings {
 		$visible_height = max( 0.01, $visible_height );
 		update_post_meta( $post_id, self::META_VISIBLE_HEIGHT, $visible_height );
 
-		$wrap_margin = isset( $_POST[ self::META_WRAP_MARGIN ] ) ? (float) wc_format_decimal( wp_unslash( $_POST[ self::META_WRAP_MARGIN ] ) ) : 0.25;
-		$wrap_margin = max( 0, $wrap_margin );
-		update_post_meta( $post_id, self::META_WRAP_MARGIN, $wrap_margin );
-
 		$puzzle_enabled = isset( $_POST[ self::META_PUZZLE_ENABLED ] ) ? 'yes' : 'no';
 		update_post_meta( $post_id, self::META_PUZZLE_ENABLED, $puzzle_enabled );
 
@@ -197,7 +176,7 @@ class WOI_Admin_Product_Settings {
 	public static function get_product_spec( $product_id ) {
 		$visible_width  = self::get_meta_float( $product_id, self::META_VISIBLE_WIDTH, 2.0 );
 		$visible_height = self::get_meta_float( $product_id, self::META_VISIBLE_HEIGHT, 2.0 );
-		$wrap_margin    = self::get_meta_float( $product_id, self::META_WRAP_MARGIN, 0.25 );
+		$wrap_margin    = WOI_Settings::get_print_bleed();
 		$puzzle_enabled = 'yes' === get_post_meta( $product_id, self::META_PUZZLE_ENABLED, true );
 		$puzzle_cols    = (int) get_post_meta( $product_id, self::META_PUZZLE_COLS, true );
 		$puzzle_rows    = (int) get_post_meta( $product_id, self::META_PUZZLE_ROWS, true );

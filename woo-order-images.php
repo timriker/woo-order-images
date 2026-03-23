@@ -1,10 +1,11 @@
 <?php
 /**
  * Plugin Name: Woo Order Images
- * Description: Adds order-linked image requirements to WooCommerce products.
+ * Description: Collects customer image uploads for WooCommerce products and generates order print sheets, including puzzle layouts.
  * Version: 0.4.0
  * Requires at least: 6.8
  * Requires PHP: 7.4
+ * Requires Plugins: woocommerce
  * Author: Tim Riker
  * Author URI: https://rikers.org
  * Text Domain: woo-order-images
@@ -42,4 +43,31 @@ add_action(
 
 		WOI_Plugin::instance()->init();
 	}
+);
+
+add_filter(
+	'plugin_action_links_' . plugin_basename( WOI_PLUGIN_FILE ),
+	static function ( $links ) {
+		$settings_url = admin_url( 'admin.php?page=woi-settings' );
+		$settings     = '<a href="' . esc_url( $settings_url ) . '">' . esc_html__( 'Settings', 'woo-order-images' ) . '</a>';
+
+		array_unshift( $links, $settings );
+
+		return $links;
+	}
+);
+
+add_filter(
+	'plugin_row_meta',
+	static function ( $links, $file ) {
+		if ( plugin_basename( WOI_PLUGIN_FILE ) !== $file ) {
+			return $links;
+		}
+
+		$links[] = '<a href="' . esc_url( 'https://github.com/bestlifemagnets/woo-order-images' ) . '" target="_blank" rel="noopener noreferrer">' . esc_html__( 'GitHub', 'woo-order-images' ) . '</a>';
+
+		return $links;
+	},
+	10,
+	2
 );

@@ -12,6 +12,7 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 // Delete all WOI settings options.
 $options_to_delete = array(
 	'woi_watermark_text',
+	'woi_print_bleed',
 	'woi_print_margin_top',
 	'woi_print_margin_right',
 	'woi_print_margin_bottom',

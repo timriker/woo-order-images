@@ -147,8 +147,9 @@ class WOI_Admin_Order_Images {
 				}
 
 				if ( ! empty( $base_spec['is_puzzle'] ) ) {
-					$cols = max( 1, (int) $base_spec['puzzle_cols'] );
-					$rows = max( 1, (int) $base_spec['puzzle_rows'] );
+					$grid = $this->resolve_puzzle_grid_for_entry( $base_spec, $url, $crop, $image_entry );
+					$cols = $grid['cols'];
+					$rows = $grid['rows'];
 					for ( $row = 0; $row < $rows; $row++ ) {
 						for ( $col = 0; $col < $cols; $col++ ) {
 							$tile_url = $this->build_puzzle_tile_data_url( $url, $crop, $base_spec, $col, $row, $cols, $rows );
@@ -378,8 +379,10 @@ class WOI_Admin_Order_Images {
 				}
 
 				$normalized[] = array(
-					'url'  => esc_url_raw( $image['url'] ),
-					'crop' => isset( $image['crop'] ) && is_array( $image['crop'] ) ? $image['crop'] : array(),
+					'url'         => esc_url_raw( $image['url'] ),
+					'crop'        => isset( $image['crop'] ) && is_array( $image['crop'] ) ? $image['crop'] : array(),
+					'puzzle_cols' => isset( $image['puzzle_cols'] ) ? max( 0, (int) $image['puzzle_cols'] ) : 0,
+					'puzzle_rows' => isset( $image['puzzle_rows'] ) ? max( 0, (int) $image['puzzle_rows'] ) : 0,
 				);
 			}
 
@@ -690,7 +693,7 @@ class WOI_Admin_Order_Images {
 	private function get_item_spec( $item ) {
 		$visible_width  = (float) $item->get_meta( WOI_Order_Images::ORDER_META_VISIBLE_WIDTH, true );
 		$visible_height = (float) $item->get_meta( WOI_Order_Images::ORDER_META_VISIBLE_HEIGHT, true );
-		$wrap_margin    = (float) $item->get_meta( WOI_Order_Images::ORDER_META_WRAP_MARGIN, true );
+		$wrap_margin    = WOI_Settings::get_print_bleed();
 		$is_puzzle      = 'yes' === $item->get_meta( WOI_Order_Images::ORDER_META_IS_PUZZLE, true );
 		$puzzle_cols    = max( 1, (int) $item->get_meta( WOI_Order_Images::ORDER_META_PUZZLE_COLS, true ) );
 		$puzzle_rows    = max( 1, (int) $item->get_meta( WOI_Order_Images::ORDER_META_PUZZLE_ROWS, true ) );
@@ -701,10 +704,6 @@ class WOI_Admin_Order_Images {
 
 		if ( $visible_height <= 0 ) {
 			$visible_height = 2.0;
-		}
-
-		if ( $wrap_margin < 0 ) {
-			$wrap_margin = 0.25;
 		}
 
 		$full_width  = $visible_width + ( 2 * $wrap_margin );
@@ -722,6 +721,59 @@ class WOI_Admin_Order_Images {
 			'visible_aspect_ratio'   => $visible_height > 0 ? $visible_width / $visible_height : 1,
 			'visible_width_percent'  => $full_width > 0 ? ( $visible_width / $full_width ) * 100 : 100,
 			'visible_height_percent' => $full_height > 0 ? ( $visible_height / $full_height ) * 100 : 100,
+		);
+	}
+
+	private function resolve_puzzle_grid_for_entry( $spec, $url, $crop, $entry ) {
+		$default_cols = max( 1, (int) $spec['puzzle_cols'] );
+		$default_rows = max( 1, (int) $spec['puzzle_rows'] );
+		$entry_cols   = isset( $entry['puzzle_cols'] ) ? max( 0, (int) $entry['puzzle_cols'] ) : 0;
+		$entry_rows   = isset( $entry['puzzle_rows'] ) ? max( 0, (int) $entry['puzzle_rows'] ) : 0;
+
+		if ( $entry_cols > 0 && $entry_rows > 0 ) {
+			return array(
+				'cols' => $entry_cols,
+				'rows' => $entry_rows,
+			);
+		}
+
+		$default_ratio = ( $default_rows > 0 && ! empty( $spec['visible_height'] ) )
+			? ( ( $default_cols * (float) $spec['visible_width'] ) / ( $default_rows * (float) $spec['visible_height'] ) )
+			: 1;
+
+		$image_ratio = null;
+		if ( is_array( $crop ) && ! empty( $crop['width'] ) && ! empty( $crop['height'] ) ) {
+			$crop_w = (float) $crop['width'];
+			$crop_h = (float) $crop['height'];
+			if ( $crop_w > 0 && $crop_h > 0 ) {
+				$image_ratio = $crop_w / $crop_h;
+			}
+		}
+
+		if ( null === $image_ratio ) {
+			$image_ratio = $this->get_image_ratio_from_url( $url );
+		}
+
+		if ( null === $image_ratio ) {
+			return array(
+				'cols' => $default_cols,
+				'rows' => $default_rows,
+			);
+		}
+
+		$image_landscape   = $image_ratio >= 1;
+		$default_landscape = $default_ratio >= 1;
+
+		if ( $image_landscape === $default_landscape ) {
+			return array(
+				'cols' => $default_cols,
+				'rows' => $default_rows,
+			);
+		}
+
+		return array(
+			'cols' => $default_rows,
+			'rows' => $default_cols,
 		);
 	}
 

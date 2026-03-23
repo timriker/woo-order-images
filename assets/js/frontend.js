@@ -49,6 +49,7 @@
 		const portraitVisibleWidthPercent = landscapeVisibleHeightPercent;
 		const portraitVisibleHeightPercent = landscapeVisibleWidthPercent;
 		const defaultOrientation = visibleAspectRatio >= 1 ? 'landscape' : 'portrait';
+		const defaultPuzzleOrientation = puzzleAspectRatio >= 1 ? 'landscape' : 'portrait';
 		let existingImages = [];
 		try {
 			existingImages = JSON.parse(existingImagesRaw);
@@ -66,6 +67,20 @@
 			cropGeometry: null,
 			cropMinZoom: null,
 			cropMaxZoom: null,
+		};
+
+		const getPuzzleGridForOrientation = (orientation) => {
+			if (orientation && orientation !== defaultPuzzleOrientation) {
+				return {
+					cols: puzzleRows,
+					rows: puzzleCols,
+				};
+			}
+
+			return {
+				cols: puzzleCols,
+				rows: puzzleRows,
+			};
 		};
 
 		const normalizeRotation = (rotation) => {
@@ -131,14 +146,23 @@
 			});
 		}
 
-		const getGeometry = (orientation) => {
+		const getGeometry = (orientation, slot = null) => {
 			if (isPuzzle) {
+				const grid = slot && slot.puzzleCols && slot.puzzleRows
+					? {
+						cols: Math.max(1, parseInt(slot.puzzleCols, 10)),
+						rows: Math.max(1, parseInt(slot.puzzleRows, 10)),
+					}
+					: getPuzzleGridForOrientation(orientation || defaultPuzzleOrientation);
+				const gridAspect = grid.rows > 0 ? grid.cols / grid.rows : 1;
 				return {
-					cropAspect: puzzleAspectRatio > 0 ? puzzleAspectRatio : 1,
-					visibleAspect: puzzleAspectRatio > 0 ? puzzleAspectRatio : 1,
+					cropAspect: gridAspect > 0 ? gridAspect : 1,
+					visibleAspect: gridAspect > 0 ? gridAspect : 1,
 					visibleWidthPercent,
 					visibleHeightPercent,
-					orientation: 'puzzle',
+					orientation: orientation || defaultPuzzleOrientation,
+					puzzleCols: grid.cols,
+					puzzleRows: grid.rows,
 				};
 			}
 
@@ -181,11 +205,11 @@
 			if (puzzleGrid) {
 				if (isPuzzle) {
 					puzzleGrid.hidden = false;
-					puzzleGrid.style.setProperty('--woi-puzzle-cols', `${puzzleCols}`);
-					puzzleGrid.style.setProperty('--woi-puzzle-rows', `${puzzleRows}`);
+					puzzleGrid.style.setProperty('--woi-puzzle-cols', `${geometry.puzzleCols}`);
+					puzzleGrid.style.setProperty('--woi-puzzle-rows', `${geometry.puzzleRows}`);
 					const label = puzzleGrid.querySelector('[data-woi-puzzle-grid-label]');
 					if (label) {
-						label.textContent = `${puzzleCols}×${puzzleRows} puzzle grid`;
+						label.textContent = `${geometry.puzzleCols}×${geometry.puzzleRows} puzzle grid`;
 					}
 				} else {
 					puzzleGrid.hidden = true;
@@ -271,6 +295,11 @@
 			slot.previewData = '';
 			slot.crop = null;
 			slot.orientation = isSquare ? 'square' : await detectImageOrientation(slot.fileUrl);
+			if (isPuzzle) {
+				const grid = getPuzzleGridForOrientation(slot.orientation);
+				slot.puzzleCols = grid.cols;
+				slot.puzzleRows = grid.rows;
+			}
 			slot.rotation = 0;
 		};
 
@@ -324,11 +353,13 @@
 					fileUrl: '',
 					sourceData: '',
 					sourceUrl: '',
-					previewData: '',
-					crop: null,
-					orientation: defaultOrientation,
-					rotation: 0,
-				});
+						previewData: '',
+						crop: null,
+						orientation: defaultOrientation,
+						puzzleCols: puzzleCols,
+						puzzleRows: puzzleRows,
+						rotation: 0,
+					});
 			}
 
 			renderSlots();
@@ -341,20 +372,19 @@
 				return;
 			}
 
-			const geometry = getGeometry(slot.orientation || defaultOrientation);
+			const geometry = getGeometry(slot.orientation || defaultOrientation, slot);
 			state.activeIndex = index;
 			modal.hidden = false;
 			modalImage.src = slot.fileUrl;
 			applyModalGuides(geometry);
-			orientationSwapButton.disabled = isSquare;
+			orientationSwapButton.disabled = !isPuzzle && isSquare;
 			if (isPuzzle) {
-				orientationSwapButton.disabled = true;
-			}
-			orientationSwapButton.textContent = isSquare
-				? 'Orientation fixed (square)'
-				: `Swap to ${geometry.orientation === 'landscape' ? 'Portrait' : 'Landscape'}`;
-			if (isPuzzle) {
-				orientationSwapButton.textContent = 'Orientation fixed (puzzle grid)';
+				const nextGrid = getPuzzleGridForOrientation(geometry.orientation === 'landscape' ? 'portrait' : 'landscape');
+				orientationSwapButton.textContent = `Swap to ${nextGrid.cols}×${nextGrid.rows}`;
+			} else {
+				orientationSwapButton.textContent = isSquare
+					? 'Orientation fixed (square)'
+					: `Swap to ${geometry.orientation === 'landscape' ? 'Portrait' : 'Landscape'}`;
 			}
 
 			if (state.cropper) {
@@ -475,7 +505,7 @@
 			slotsWrap.innerHTML = '';
 
 			state.slots.forEach((slot, index) => {
-				const geometry = getGeometry(slot.orientation || defaultOrientation);
+				const geometry = getGeometry(slot.orientation || defaultOrientation, slot);
 				const fragment = slotTemplate.content.cloneNode(true);
 				const root = fragment.querySelector('[data-woi-slot]');
 				const title = fragment.querySelector('.woi-upload-title');
@@ -488,12 +518,16 @@
 
 				title.textContent = `Image ${index + 1}`;
 				previewWrap.style.aspectRatio = `${geometry.visibleAspect}`;
-				const payload = (slot.crop && slot.sourceUrl)
-					? {
-						source: slot.sourceUrl,
-						crop: slot.crop,
-					}
-					: null;
+					const payload = (slot.crop && slot.sourceUrl)
+						? {
+							source: slot.sourceUrl,
+							crop: slot.crop,
+							...(isPuzzle ? {
+								puzzle_cols: Math.max(1, parseInt(slot.puzzleCols || puzzleCols, 10)),
+								puzzle_rows: Math.max(1, parseInt(slot.puzzleRows || puzzleRows, 10)),
+							} : {}),
+						}
+						: null;
 				hiddenInput.value = payload ? JSON.stringify(payload) : '';
 
 				if (slot.previewData) {
@@ -551,12 +585,17 @@
 		};
 
 		orientationSwapButton.addEventListener('click', () => {
-			if (isSquare || state.activeIndex < 0 || !state.slots[state.activeIndex]) {
+			if ((!isPuzzle && isSquare) || state.activeIndex < 0 || !state.slots[state.activeIndex]) {
 				return;
 			}
 
 			const slot = state.slots[state.activeIndex];
 			slot.orientation = slot.orientation === 'portrait' ? 'landscape' : 'portrait';
+			if (isPuzzle) {
+				const grid = getPuzzleGridForOrientation(slot.orientation);
+				slot.puzzleCols = grid.cols;
+				slot.puzzleRows = grid.rows;
+			}
 			openModalForSlot(state.activeIndex);
 		});
 
@@ -603,12 +642,18 @@
 					}
 
 					slot.sourceData = '';
-					slot.sourceUrl = result.data.url;
-					slot.previewData = '';
-					slot.crop = null;
-					slot.rotation = 0;
-					openModalForSlot(state.activeIndex);
-				})
+						slot.sourceUrl = result.data.url;
+						slot.previewData = '';
+						slot.crop = null;
+						slot.orientation = isSquare ? 'square' : await detectImageOrientation(slot.fileUrl);
+						if (isPuzzle) {
+							const grid = getPuzzleGridForOrientation(slot.orientation);
+							slot.puzzleCols = grid.cols;
+							slot.puzzleRows = grid.rows;
+						}
+						slot.rotation = 0;
+						openModalForSlot(state.activeIndex);
+					})
 				.catch(() => {
 					window.alert('Unable to rotate this image right now.');
 				});
@@ -732,6 +777,19 @@
 					? entry.crop
 					: null;
 				state.slots[index].orientation = isSquare ? 'square' : await detectImageOrientation(imageUrl);
+				if (isPuzzle) {
+					const entryCols = entry && typeof entry === 'object' ? parseInt(entry.puzzle_cols || '0', 10) : 0;
+					const entryRows = entry && typeof entry === 'object' ? parseInt(entry.puzzle_rows || '0', 10) : 0;
+					if (entryCols > 0 && entryRows > 0) {
+						state.slots[index].puzzleCols = entryCols;
+						state.slots[index].puzzleRows = entryRows;
+						state.slots[index].orientation = entryCols >= entryRows ? 'landscape' : 'portrait';
+					} else {
+						const grid = getPuzzleGridForOrientation(state.slots[index].orientation);
+						state.slots[index].puzzleCols = grid.cols;
+						state.slots[index].puzzleRows = grid.rows;
+					}
+				}
 				state.slots[index].rotation = 0;
 			}
 

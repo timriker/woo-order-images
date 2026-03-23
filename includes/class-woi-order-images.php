@@ -9,7 +9,6 @@ class WOI_Order_Images {
 	const CART_REQUIRED_PER_QTY_KEY = 'woi_required_per_qty';
 	const CART_VISIBLE_WIDTH_KEY = 'woi_visible_width';
 	const CART_VISIBLE_HEIGHT_KEY = 'woi_visible_height';
-	const CART_WRAP_MARGIN_KEY = 'woi_wrap_margin';
 	const CART_IS_PUZZLE_KEY = 'woi_is_puzzle';
 	const CART_PUZZLE_COLS_KEY = 'woi_puzzle_cols';
 	const CART_PUZZLE_ROWS_KEY = 'woi_puzzle_rows';
@@ -25,6 +24,7 @@ class WOI_Order_Images {
 	public function init() {
 		add_filter( 'woocommerce_add_to_cart_validation', array( $this, 'validate_required_images' ), 10, 5 );
 		add_filter( 'woocommerce_add_cart_item_data', array( $this, 'add_cart_item_data' ), 10, 4 );
+		add_filter( 'woocommerce_add_to_cart_redirect', array( $this, 'redirect_after_add_to_cart' ), 10, 2 );
 		add_action( 'woocommerce_add_to_cart', array( $this, 'replace_updated_cart_item' ), 10, 6 );
 		add_action( 'wp_ajax_woi_stage_image_upload', array( $this, 'ajax_stage_image_upload' ) );
 		add_action( 'wp_ajax_nopriv_woi_stage_image_upload', array( $this, 'ajax_stage_image_upload' ) );
@@ -134,6 +134,23 @@ class WOI_Order_Images {
 		return $passed;
 	}
 
+	public function redirect_after_add_to_cart( $url, $adding_to_cart = null ) {
+		$product_id = 0;
+
+		if ( $adding_to_cart instanceof WC_Product ) {
+			$product_id = (int) $adding_to_cart->get_id();
+		} elseif ( isset( $_REQUEST['add-to-cart'] ) ) {
+			$product_id = absint( wp_unslash( $_REQUEST['add-to-cart'] ) );
+		}
+
+		if ( $product_id <= 0 || ! $this->is_woi_product( $product_id ) ) {
+			return $url;
+		}
+
+		$shop_url = wc_get_page_permalink( 'shop' );
+		return $shop_url ? $shop_url : home_url( '/' );
+	}
+
 	public function ajax_stage_image_upload() {
 		check_ajax_referer( 'woi_stage_image_upload', 'nonce' );
 
@@ -184,6 +201,8 @@ class WOI_Order_Images {
 		foreach ( $image_entries as $entry ) {
 			$source_value = isset( $entry['source'] ) ? (string) $entry['source'] : '';
 			$crop         = isset( $entry['crop'] ) && is_array( $entry['crop'] ) ? $this->sanitize_crop_data( $entry['crop'] ) : array();
+			$puzzle_cols  = isset( $entry['puzzle_cols'] ) ? max( 0, (int) $entry['puzzle_cols'] ) : 0;
+			$puzzle_rows  = isset( $entry['puzzle_rows'] ) ? max( 0, (int) $entry['puzzle_rows'] ) : 0;
 			$file         = array();
 
 			if ( $this->is_valid_data_url( $source_value ) ) {
@@ -200,6 +219,13 @@ class WOI_Order_Images {
 			}
 
 			$file['crop'] = $crop;
+			if ( $is_puzzle ) {
+				$grid = $this->resolve_puzzle_grid( $spec, $crop, $source_value, $puzzle_cols, $puzzle_rows );
+				$file['puzzle_cols'] = $grid['cols'];
+				$file['puzzle_rows'] = $grid['rows'];
+				$cart_item_data[ self::CART_PUZZLE_COLS_KEY ] = $grid['cols'];
+				$cart_item_data[ self::CART_PUZZLE_ROWS_KEY ] = $grid['rows'];
+			}
 			$saved[]      = $file;
 
 			if ( $is_puzzle ) {
@@ -216,10 +242,13 @@ class WOI_Order_Images {
 			$cart_item_data[ self::CART_REQUIRED_PER_QTY_KEY ] = $required_per_qty;
 			$cart_item_data[ self::CART_VISIBLE_WIDTH_KEY ] = $spec['visible_width'];
 			$cart_item_data[ self::CART_VISIBLE_HEIGHT_KEY ] = $spec['visible_height'];
-			$cart_item_data[ self::CART_WRAP_MARGIN_KEY ] = $spec['wrap_margin'];
 			$cart_item_data[ self::CART_IS_PUZZLE_KEY ] = $is_puzzle ? 'yes' : 'no';
-			$cart_item_data[ self::CART_PUZZLE_COLS_KEY ] = max( 1, (int) $spec['puzzle_cols'] );
-			$cart_item_data[ self::CART_PUZZLE_ROWS_KEY ] = max( 1, (int) $spec['puzzle_rows'] );
+			if ( ! isset( $cart_item_data[ self::CART_PUZZLE_COLS_KEY ] ) ) {
+				$cart_item_data[ self::CART_PUZZLE_COLS_KEY ] = max( 1, (int) $spec['puzzle_cols'] );
+			}
+			if ( ! isset( $cart_item_data[ self::CART_PUZZLE_ROWS_KEY ] ) ) {
+				$cart_item_data[ self::CART_PUZZLE_ROWS_KEY ] = max( 1, (int) $spec['puzzle_rows'] );
+			}
 			$cart_item_data['woi_unique']     = md5( wp_json_encode( $saved ) . microtime( true ) );
 		}
 
@@ -409,8 +438,10 @@ class WOI_Order_Images {
 			if ( ! empty( $image['url'] ) ) {
 				$url = esc_url_raw( $image['url'] );
 				$images[] = array(
-					'url'  => $url,
-					'crop' => isset( $image['crop'] ) && is_array( $image['crop'] ) ? $this->sanitize_crop_data( $image['crop'] ) : array(),
+					'url'         => $url,
+					'crop'        => isset( $image['crop'] ) && is_array( $image['crop'] ) ? $this->sanitize_crop_data( $image['crop'] ) : array(),
+					'puzzle_cols' => isset( $image['puzzle_cols'] ) ? max( 0, (int) $image['puzzle_cols'] ) : 0,
+					'puzzle_rows' => isset( $image['puzzle_rows'] ) ? max( 0, (int) $image['puzzle_rows'] ) : 0,
 				);
 			}
 		}
@@ -418,7 +449,6 @@ class WOI_Order_Images {
 		if ( ! empty( $images ) ) {
 			$visible_width  = isset( $values[ self::CART_VISIBLE_WIDTH_KEY ] ) ? (float) $values[ self::CART_VISIBLE_WIDTH_KEY ] : 1;
 			$visible_height = isset( $values[ self::CART_VISIBLE_HEIGHT_KEY ] ) ? (float) $values[ self::CART_VISIBLE_HEIGHT_KEY ] : 1;
-			$wrap_margin    = isset( $values[ self::CART_WRAP_MARGIN_KEY ] ) ? (float) $values[ self::CART_WRAP_MARGIN_KEY ] : 0.25;
 			$is_puzzle      = isset( $values[ self::CART_IS_PUZZLE_KEY ] ) && 'yes' === $values[ self::CART_IS_PUZZLE_KEY ];
 			$puzzle_cols    = isset( $values[ self::CART_PUZZLE_COLS_KEY ] ) ? max( 1, (int) $values[ self::CART_PUZZLE_COLS_KEY ] ) : 1;
 			$puzzle_rows    = isset( $values[ self::CART_PUZZLE_ROWS_KEY ] ) ? max( 1, (int) $values[ self::CART_PUZZLE_ROWS_KEY ] ) : 1;
@@ -427,7 +457,6 @@ class WOI_Order_Images {
 			$item->add_meta_data( self::ORDER_META_COUNT, count( $images ) );
 			$item->add_meta_data( self::ORDER_META_VISIBLE_WIDTH, $visible_width );
 			$item->add_meta_data( self::ORDER_META_VISIBLE_HEIGHT, $visible_height );
-			$item->add_meta_data( self::ORDER_META_WRAP_MARGIN, $wrap_margin );
 			$item->add_meta_data( self::ORDER_META_IS_PUZZLE, $is_puzzle ? 'yes' : 'no' );
 			$item->add_meta_data( self::ORDER_META_PUZZLE_COLS, $puzzle_cols );
 			$item->add_meta_data( self::ORDER_META_PUZZLE_ROWS, $puzzle_rows );
@@ -684,8 +713,10 @@ class WOI_Order_Images {
 			}
 
 			$entries[] = array(
-				'source' => (string) $decoded['source'],
-				'crop'   => isset( $decoded['crop'] ) && is_array( $decoded['crop'] ) ? $decoded['crop'] : array(),
+				'source'      => (string) $decoded['source'],
+				'crop'        => isset( $decoded['crop'] ) && is_array( $decoded['crop'] ) ? $decoded['crop'] : array(),
+				'puzzle_cols' => isset( $decoded['puzzle_cols'] ) ? max( 1, (int) $decoded['puzzle_cols'] ) : 0,
+				'puzzle_rows' => isset( $decoded['puzzle_rows'] ) ? max( 1, (int) $decoded['puzzle_rows'] ) : 0,
 			);
 		}
 
@@ -731,6 +762,76 @@ class WOI_Order_Images {
 
 		$path = $this->url_to_upload_path( $value );
 		return (bool) ( $path && file_exists( $path ) );
+	}
+
+	private function is_woi_product( $product_id ) {
+		$product_id = (int) $product_id;
+		if ( $product_id <= 0 ) {
+			return false;
+		}
+
+		$enabled = get_post_meta( $product_id, WOI_Admin_Product_Settings::META_ENABLED, true );
+		if ( 'yes' === $enabled ) {
+			return true;
+		}
+
+		$parent_id = wp_get_post_parent_id( $product_id );
+		if ( $parent_id > 0 ) {
+			return 'yes' === get_post_meta( $parent_id, WOI_Admin_Product_Settings::META_ENABLED, true );
+		}
+
+		return false;
+	}
+
+	private function resolve_puzzle_grid( $spec, $crop, $source_url, $explicit_cols = 0, $explicit_rows = 0 ) {
+		$default_cols = max( 1, (int) $spec['puzzle_cols'] );
+		$default_rows = max( 1, (int) $spec['puzzle_rows'] );
+
+		if ( $explicit_cols > 0 && $explicit_rows > 0 ) {
+			return array(
+				'cols' => $explicit_cols,
+				'rows' => $explicit_rows,
+			);
+		}
+
+		$default_ratio = ( $default_rows > 0 && ! empty( $spec['visible_height'] ) )
+			? ( ( $default_cols * (float) $spec['visible_width'] ) / ( $default_rows * (float) $spec['visible_height'] ) )
+			: 1;
+
+		$image_ratio = null;
+		if ( is_array( $crop ) && ! empty( $crop['width'] ) && ! empty( $crop['height'] ) ) {
+			$crop_w = (float) $crop['width'];
+			$crop_h = (float) $crop['height'];
+			if ( $crop_w > 0 && $crop_h > 0 ) {
+				$image_ratio = $crop_w / $crop_h;
+			}
+		}
+
+		if ( null === $image_ratio ) {
+			$image_ratio = $this->get_image_ratio_from_url( $source_url );
+		}
+
+		if ( null === $image_ratio ) {
+			return array(
+				'cols' => $default_cols,
+				'rows' => $default_rows,
+			);
+		}
+
+		$image_landscape   = $image_ratio >= 1;
+		$default_landscape = $default_ratio >= 1;
+
+		if ( $image_landscape === $default_landscape ) {
+			return array(
+				'cols' => $default_cols,
+				'rows' => $default_rows,
+			);
+		}
+
+		return array(
+			'cols' => $default_rows,
+			'rows' => $default_cols,
+		);
 	}
 
 	private function save_data_url_image( $data_url ) {

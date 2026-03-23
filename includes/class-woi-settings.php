@@ -8,6 +8,7 @@ class WOI_Settings {
 	const OPTION_WATERMARK_TEXT = 'woi_watermark_text';
 	const DEFAULT_WATERMARK_TEXT = 'BestLifeMagnets.com';
 
+	const OPTION_PRINT_BLEED = 'woi_print_bleed';
 	const OPTION_PRINT_MARGIN_TOP = 'woi_print_margin_top';
 	const OPTION_PRINT_MARGIN_RIGHT = 'woi_print_margin_right';
 	const OPTION_PRINT_MARGIN_BOTTOM = 'woi_print_margin_bottom';
@@ -15,6 +16,7 @@ class WOI_Settings {
 	const OPTION_PRINT_GAP = 'woi_print_gap';
 	const OPTION_PRINT_PAGE_SIZE = 'woi_print_page_size';
 
+	const DEFAULT_PRINT_BLEED = 0.4;
 	const DEFAULT_PRINT_MARGIN_TOP = 0.25;
 	const DEFAULT_PRINT_MARGIN_RIGHT = 0.25;
 	const DEFAULT_PRINT_MARGIN_BOTTOM = 0.5;
@@ -56,6 +58,15 @@ class WOI_Settings {
 			array(
 				'sanitize_callback' => 'sanitize_text_field',
 				'default'           => self::DEFAULT_WATERMARK_TEXT,
+			)
+		);
+
+		register_setting(
+			'woi_settings_group',
+			self::OPTION_PRINT_BLEED,
+			array(
+				'sanitize_callback' => array( $this, 'sanitize_float' ),
+				'default'           => self::DEFAULT_PRINT_BLEED,
 			)
 		);
 
@@ -129,6 +140,14 @@ class WOI_Settings {
 		);
 
 		add_settings_field(
+			self::OPTION_PRINT_BLEED,
+			__( 'Bleed area (in)', 'woo-order-images' ),
+			array( $this, 'render_bleed_field' ),
+			'woi-settings',
+			'woi_print_section'
+		);
+
+		add_settings_field(
 			self::OPTION_PRINT_MARGIN_TOP,
 			__( 'Top margin (in)', 'woo-order-images' ),
 			array( $this, 'render_margin_field_top' ),
@@ -181,6 +200,12 @@ class WOI_Settings {
 		$value = self::get_watermark_text();
 		echo '<input type="text" class="regular-text" name="' . esc_attr( self::OPTION_WATERMARK_TEXT ) . '" value="' . esc_attr( $value ) . '" />';
 		echo '<p class="description">' . esc_html__( 'Text printed in the bleed-area flaps outside the visible area.', 'woo-order-images' ) . '</p>';
+	}
+
+	public function render_bleed_field() {
+		$value = self::get_print_bleed();
+		echo '<input type="number" step="0.01" min="0" class="small-text" name="' . esc_attr( self::OPTION_PRINT_BLEED ) . '" value="' . esc_attr( $value ) . '" />';
+		echo '<p class="description">' . esc_html__( 'Global bleed area added on all sides when rendering previews and print sheets. Default: 0.4 inch.', 'woo-order-images' ) . '</p>';
 	}
 
 	public function render_margin_field_top() {
@@ -307,6 +332,12 @@ class WOI_Settings {
 
 	public static function get_print_margin_top() {
 		return (float) get_option( self::OPTION_PRINT_MARGIN_TOP, self::DEFAULT_PRINT_MARGIN_TOP );
+	}
+
+	public static function get_print_bleed() {
+		$value = (float) get_option( self::OPTION_PRINT_BLEED, self::DEFAULT_PRINT_BLEED );
+
+		return max( 0, $value );
 	}
 
 	public static function get_print_margin_right() {

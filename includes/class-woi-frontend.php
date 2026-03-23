@@ -140,9 +140,11 @@ class WOI_Frontend {
 				if ( ! empty( $spec['is_puzzle'] ) ) {
 					echo esc_html(
 						sprintf(
-							__( 'Puzzle mode: upload 1 image per quantity. Crop uses a %1$d×%2$d grid overlay for this product.', 'woo-order-images' ),
+							__( 'Puzzle mode: upload 1 image per quantity. Crop uses a %1$d×%2$d grid overlay for this product and swaps to %3$d×%4$d for landscape images. Use Swap Orientation to override.', 'woo-order-images' ),
 							(int) $spec['puzzle_cols'],
-							(int) $spec['puzzle_rows']
+							(int) $spec['puzzle_rows'],
+							(int) $spec['puzzle_rows'],
+							(int) $spec['puzzle_cols']
 						)
 					);
 				} elseif ( $is_update ) {
