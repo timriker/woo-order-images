@@ -104,22 +104,22 @@ body {
 }
 
 .woi-watermark-left span {
-	left: 62.5%;
+	left: 70%;
 }
 
 .woi-watermark-right span {
-	left: 37.5%;
+	left: 24%;
 }
 
 /* Top and bottom band positioning */
 .woi-watermark-top {
 	align-items: flex-end;
-	padding-bottom: 2px;
+	padding-bottom: 1px;
 }
 
 .woi-watermark-bottom {
 	align-items: flex-start;
-	padding-top: 2px;
+	padding-top: 1px;
 }
 
 /* Left and right band container styles */

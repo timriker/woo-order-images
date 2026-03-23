@@ -334,7 +334,7 @@ class WOI_Admin_Order_Images {
 				$bottom_band_height = $bottom_safe;
 				$left_band_left  = 0;
 				$left_band_width = $left_safe;
-				$right_band_right = 0;
+				$right_band_right = $right_safe * 0.2;
 				$right_band_width = $right_safe;
 				$image_width     = $this->format_pct( 10000 / max( 0.0001, $window_width ) );
 				$image_height    = $this->format_pct( 10000 / max( 0.0001, $window_height ) );
@@ -348,8 +348,8 @@ class WOI_Admin_Order_Images {
 				echo '</div>';
 
 				if ( '' !== trim( $watermark_text ) ) {
-					// Font size = 1/3 of one bleed tab (wrap_margin × 72 pt/in ÷ 3), in pt.
-					$wm_font_pt = $this->format_num( max( 4, $spec['wrap_margin'] * 24 ) );
+					// Keep the watermark modest relative to the bleed tab and slightly smaller than before.
+					$wm_font_pt = $this->format_num( max( 4, $spec['wrap_margin'] * 19.2 ) );
 					$wm_style   = 'font-size:' . esc_attr( $wm_font_pt ) . 'pt;';
 					echo '<div class="woi-watermark-band woi-watermark-top" style="left:0;top:' . esc_attr( $this->format_pct( $top_band_top ) ) . ';width:100%;height:' . esc_attr( $this->format_pct( $top_band_height ) ) . ';"><span style="' . $wm_style . '">' . esc_html( $watermark_text ) . '</span></div>';
 					echo '<div class="woi-watermark-band woi-watermark-bottom" style="left:0;bottom:' . esc_attr( $this->format_pct( $bottom_band_bottom ) ) . ';width:100%;height:' . esc_attr( $this->format_pct( $bottom_band_height ) ) . ';"><span style="' . $wm_style . '">' . esc_html( $watermark_text ) . '</span></div>';
