@@ -334,7 +334,7 @@ class WOI_Admin_Order_Images {
 				$bottom_band_height = $bottom_safe;
 				$left_band_left  = 0;
 				$left_band_width = $left_safe;
-				$right_band_right = $right_safe * 0.2;
+				$right_band_right = 0;
 				$right_band_width = $right_safe;
 				$image_width     = $this->format_pct( 10000 / max( 0.0001, $window_width ) );
 				$image_height    = $this->format_pct( 10000 / max( 0.0001, $window_height ) );
