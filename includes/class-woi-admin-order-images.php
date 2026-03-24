@@ -310,61 +310,60 @@ class WOI_Admin_Order_Images {
 	}
 
 	public function render_print_page() {
-		try {
-			if ( ! current_user_can( 'manage_woocommerce' ) ) {
-				wp_die( esc_html__( 'You do not have permission to view this page.', 'woo-order-images' ) );
+		if ( ! current_user_can( 'manage_woocommerce' ) ) {
+			wp_die( esc_html__( 'You do not have permission to view this page.', 'woo-order-images' ) );
+		}
+
+		$order_id = isset( $_GET['order_id'] ) ? absint( wp_unslash( $_GET['order_id'] ) ) : 0;
+		$order    = wc_get_order( $order_id );
+		if ( ! $order ) {
+			wp_die( esc_html__( 'Order not found.', 'woo-order-images' ) );
+		}
+
+		$entries = array();
+		foreach ( $order->get_items() as $item ) {
+			if ( ! $item instanceof WC_Order_Item_Product ) {
+				continue;
 			}
 
-			$order_id = isset( $_GET['order_id'] ) ? absint( wp_unslash( $_GET['order_id'] ) ) : 0;
-			$order    = wc_get_order( $order_id );
-			if ( ! $order ) {
-				wp_die( esc_html__( 'Order not found.', 'woo-order-images' ) );
+			$images = $this->get_order_item_images( $item );
+			if ( empty( $images ) ) {
+				continue;
 			}
 
-			$entries = array();
-			foreach ( $order->get_items() as $item ) {
-				if ( ! $item instanceof WC_Order_Item_Product ) {
+			$base_spec = $this->get_item_spec( $item );
+			foreach ( $images as $image_entry ) {
+				$url  = isset( $image_entry['url'] ) ? $image_entry['url'] : '';
+				$crop = isset( $image_entry['crop'] ) && is_array( $image_entry['crop'] ) ? $image_entry['crop'] : array();
+				if ( '' === $url ) {
 					continue;
 				}
 
-				$images = $this->get_order_item_images( $item );
-				if ( empty( $images ) ) {
-					continue;
-				}
-
-				$base_spec = $this->get_item_spec( $item );
-				foreach ( $images as $image_entry ) {
-					$url  = isset( $image_entry['url'] ) ? $image_entry['url'] : '';
-					$crop = isset( $image_entry['crop'] ) && is_array( $image_entry['crop'] ) ? $image_entry['crop'] : array();
-					if ( '' === $url ) {
-						continue;
-					}
-
-					if ( ! empty( $base_spec['is_puzzle'] ) ) {
-						$grid = $this->resolve_puzzle_grid_for_entry( $base_spec, $url, $crop, $image_entry );
-						$cols = $grid['cols'];
-						$rows = $grid['rows'];
-						for ( $row = 0; $row < $rows; $row++ ) {
-							for ( $col = 0; $col < $cols; $col++ ) {
+				if ( ! empty( $base_spec['is_puzzle'] ) ) {
+					$grid = $this->resolve_puzzle_grid_for_entry( $base_spec, $url, $crop, $image_entry );
+					$cols = $grid['cols'];
+					$rows = $grid['rows'];
+					for ( $row = 0; $row < $rows; $row++ ) {
+						for ( $col = 0; $col < $cols; $col++ ) {
 								$entries[] = array(
-									'url'  => $this->get_print_image_url( $order->get_id(), $item->get_id(), $image_entry, $base_spec, $row, $col ),
+									'url'  => $this->get_print_image_url( $order->get_id(), $item->get_id(), $image_entry, $base_spec, $row, $col, $cols, $rows ),
 									'spec' => $base_spec,
 								);
-							}
 						}
-					} else {
-						$oriented_spec = $this->get_oriented_spec_for_crop( $base_spec, $url, $crop );
-						$entries[] = array(
-							'url'  => $this->get_print_image_url( $order->get_id(), $item->get_id(), $image_entry, $oriented_spec ),
-							'spec' => $oriented_spec,
-						);
 					}
+				} else {
+					$oriented_spec = $this->get_oriented_spec_for_crop( $base_spec, $url, $crop );
+					$entries[] = array(
+						'url'  => $this->get_print_image_url( $order->get_id(), $item->get_id(), $image_entry, $oriented_spec ),
+						'spec' => $oriented_spec,
+					);
 				}
 			}
+		}
 
-			if ( empty( $entries ) ) {
-				wp_die( esc_html__( 'No order images found for this order.', 'woo-order-images' ) );
-			}
+		if ( empty( $entries ) ) {
+			wp_die( esc_html__( 'No order images found for this order.', 'woo-order-images' ) );
+		}
 
 			$watermark_text = WOI_Settings::get_watermark_text();
 			$margin_top     = WOI_Settings::get_print_margin_top();
@@ -549,74 +548,83 @@ class WOI_Admin_Order_Images {
 				echo '</div>';
 			}
 
-			echo '</body></html>';
-			exit;
-		} catch ( Throwable $e ) {
-			$this->log_print_debug( 'render_print_page', $e );
-			wp_die( esc_html__( 'Unable to render the print sheet right now.', 'woo-order-images' ) );
-		}
+		echo '</body></html>';
+		exit;
 	}
 
 	public function render_print_image() {
-		try {
-			if ( ! current_user_can( 'manage_woocommerce' ) ) {
-				wp_die( esc_html__( 'You do not have permission to view this image.', 'woo-order-images' ) );
-			}
-
-			$order_id    = isset( $_GET['order_id'] ) ? absint( wp_unslash( $_GET['order_id'] ) ) : 0;
-			$item_id     = isset( $_GET['item_id'] ) ? absint( wp_unslash( $_GET['item_id'] ) ) : 0;
-			$image_index = isset( $_GET['image_index'] ) ? absint( wp_unslash( $_GET['image_index'] ) ) : -1;
-			$row         = isset( $_GET['row'] ) ? absint( wp_unslash( $_GET['row'] ) ) : -1;
-			$col         = isset( $_GET['col'] ) ? absint( wp_unslash( $_GET['col'] ) ) : -1;
-
-			$order = wc_get_order( $order_id );
-			if ( ! $order ) {
-				wp_die( esc_html__( 'Order not found.', 'woo-order-images' ) );
-			}
-
-			$item = $order->get_item( $item_id );
-			if ( ! $item instanceof WC_Order_Item_Product ) {
-				wp_die( esc_html__( 'Order item not found.', 'woo-order-images' ) );
-			}
-
-			$images = $this->get_order_item_images( $item );
-			if ( ! isset( $images[ $image_index ] ) ) {
-				wp_die( esc_html__( 'Order image not found.', 'woo-order-images' ) );
-			}
-
-			$image_entry = $images[ $image_index ];
-			$url         = isset( $image_entry['url'] ) ? (string) $image_entry['url'] : '';
-			$crop        = isset( $image_entry['crop'] ) && is_array( $image_entry['crop'] ) ? $image_entry['crop'] : array();
-			if ( '' === $url ) {
-				wp_die( esc_html__( 'Order image not found.', 'woo-order-images' ) );
-			}
-
-			$base_spec = $this->get_item_spec( $item );
-			if ( ! empty( $base_spec['is_puzzle'] ) ) {
-				$grid = $this->resolve_puzzle_grid_for_entry( $base_spec, $url, $crop, $image_entry );
-				if ( $row < 0 || $col < 0 || $row >= $grid['rows'] || $col >= $grid['cols'] ) {
-					wp_die( esc_html__( 'Puzzle tile not found.', 'woo-order-images' ) );
-				}
-
-				$jpeg = $this->build_puzzle_tile_jpeg( $url, $crop, $base_spec, $col, $row, $grid['cols'], $grid['rows'] );
-			} else {
-				$spec = $this->get_oriented_spec_for_crop( $base_spec, $url, $crop );
-				$jpeg = $this->build_single_tile_jpeg( $url, $crop, $spec );
-			}
-
-			if ( empty( $jpeg ) ) {
-				wp_die( esc_html__( 'Unable to generate the print image.', 'woo-order-images' ) );
-			}
-
-			nocache_headers();
-			header( 'Content-Type: image/jpeg' );
-			header( 'Content-Length: ' . strlen( $jpeg ) );
-			echo $jpeg; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
-			exit;
-		} catch ( Throwable $e ) {
-			$this->log_print_debug( 'render_print_image', $e );
-			wp_die( esc_html__( 'Unable to render the print image right now.', 'woo-order-images' ) );
+		if ( ! current_user_can( 'manage_woocommerce' ) ) {
+			wp_die( esc_html__( 'You do not have permission to view this image.', 'woo-order-images' ) );
 		}
+
+		$order_id    = isset( $_GET['order_id'] ) ? absint( wp_unslash( $_GET['order_id'] ) ) : 0;
+		$item_id     = isset( $_GET['item_id'] ) ? absint( wp_unslash( $_GET['item_id'] ) ) : 0;
+		$image_index = isset( $_GET['image_index'] ) ? absint( wp_unslash( $_GET['image_index'] ) ) : -1;
+		$row         = isset( $_GET['row'] ) ? absint( wp_unslash( $_GET['row'] ) ) : -1;
+		$col         = isset( $_GET['col'] ) ? absint( wp_unslash( $_GET['col'] ) ) : -1;
+
+		$order = wc_get_order( $order_id );
+		if ( ! $order ) {
+			wp_die( esc_html__( 'Order not found.', 'woo-order-images' ) );
+		}
+
+		$item = $order->get_item( $item_id );
+		if ( ! $item instanceof WC_Order_Item_Product ) {
+			wp_die( esc_html__( 'Order item not found.', 'woo-order-images' ) );
+		}
+
+		$images = $this->get_order_item_images( $item );
+		if ( ! isset( $images[ $image_index ] ) ) {
+			wp_die( esc_html__( 'Order image not found.', 'woo-order-images' ) );
+		}
+
+		$image_entry = $images[ $image_index ];
+		$url         = isset( $image_entry['url'] ) ? (string) $image_entry['url'] : '';
+		$crop        = isset( $image_entry['crop'] ) && is_array( $image_entry['crop'] ) ? $image_entry['crop'] : array();
+		if ( '' === $url ) {
+			wp_die( esc_html__( 'Order image not found.', 'woo-order-images' ) );
+		}
+
+		$base_spec = $this->get_item_spec( $item );
+		if ( ! empty( $base_spec['is_puzzle'] ) ) {
+			$grid = $this->resolve_puzzle_grid_for_entry( $base_spec, $url, $crop, $image_entry );
+			if ( $row < 0 || $col < 0 || $row >= $grid['rows'] || $col >= $grid['cols'] ) {
+				wp_die( esc_html__( 'Puzzle tile not found.', 'woo-order-images' ) );
+			}
+
+			$cache_key = $this->get_print_image_cache_key( $image_entry, $base_spec, $row, $col, $grid['cols'], $grid['rows'] );
+			$jpeg = $this->build_puzzle_tile_jpeg( $url, $crop, $base_spec, $col, $row, $grid['cols'], $grid['rows'] );
+		} else {
+			$spec = $this->get_oriented_spec_for_crop( $base_spec, $url, $crop );
+			$cache_key = $this->get_print_image_cache_key( $image_entry, $spec );
+			$jpeg = $this->build_single_tile_jpeg( $url, $crop, $spec );
+		}
+
+		if ( empty( $jpeg ) ) {
+			wp_die( esc_html__( 'Unable to generate the print image.', 'woo-order-images' ) );
+		}
+
+		$etag = '"' . $cache_key . '"';
+		if ( isset( $_SERVER['HTTP_IF_NONE_MATCH'] ) ) {
+			$if_none_match = trim( (string) wp_unslash( $_SERVER['HTTP_IF_NONE_MATCH'] ) );
+			if ( $if_none_match === $etag ) {
+				status_header( 304 );
+				header_remove( 'Pragma' );
+				header( 'ETag: ' . $etag );
+				header( 'Cache-Control: private, max-age=3600, stale-while-revalidate=86400' );
+				header( 'Expires: ' . gmdate( 'D, d M Y H:i:s', time() + HOUR_IN_SECONDS ) . ' GMT' );
+				exit;
+			}
+		}
+
+		header_remove( 'Pragma' );
+		header( 'Content-Type: image/jpeg' );
+		header( 'Content-Length: ' . strlen( $jpeg ) );
+		header( 'ETag: ' . $etag );
+		header( 'Cache-Control: private, max-age=3600, stale-while-revalidate=86400' );
+		header( 'Expires: ' . gmdate( 'D, d M Y H:i:s', time() + HOUR_IN_SECONDS ) . ' GMT' );
+		echo $jpeg; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+		exit;
 	}
 
 	private function get_order_item_images( $item ) {
@@ -845,20 +853,20 @@ class WOI_Admin_Order_Images {
 		$white = imagecolorallocate( $tile_img, 255, 255, 255 );
 		imagefill( $tile_img, 0, 0, $white );
 
-		imagecopyresampled(
+		$this->copy_tile_with_source_bleed(
 			$tile_img,
 			$source,
-			$bleed_x_px,
-			$bleed_y_px,
-			$rect['x'],
-			$rect['y'],
+			(float) $rect['x'],
+			(float) $rect['y'],
+			(float) $rect['x'] + (float) $rect['w'],
+			(float) $rect['y'] + (float) $rect['h'],
 			$visible_w_px,
 			$visible_h_px,
-			$rect['w'],
-			$rect['h']
+			$bleed_x_px,
+			$bleed_y_px,
+			$src_w,
+			$src_h
 		);
-
-		$this->extend_tile_bleed_from_visible( $tile_img, $bleed_x_px, $bleed_y_px, $visible_w_px, $visible_h_px );
 
 		ob_start();
 		imagejpeg( $tile_img, null, 92 );
@@ -1220,15 +1228,6 @@ class WOI_Admin_Order_Images {
 		$bleed_x_px = max( 0, (int) round( $wrap_margin_in * $scale_x ) );
 		$bleed_y_px = max( 0, (int) round( $wrap_margin_in * $scale_y ) );
 
-		$overlap_in = 1 / 16;
-		$overlap_x_px = max( 1, (int) round( $overlap_in * $scale_x ) );
-		$overlap_y_px = max( 1, (int) round( $overlap_in * $scale_y ) );
-
-		$left_overlap   = $col > 0 ? $overlap_x_px : 0;
-		$right_overlap  = $col < ( $cols - 1 ) ? $overlap_x_px : 0;
-		$top_overlap    = $row > 0 ? $overlap_y_px : 0;
-		$bottom_overlap = $row < ( $rows - 1 ) ? $overlap_y_px : 0;
-
 		$src_x0 = $rect['x'] + ( $col * $rect['w'] ) / max( 1, $cols );
 		$src_x1 = $rect['x'] + ( ( $col + 1 ) * $rect['w'] ) / max( 1, $cols );
 		$src_y0 = $rect['y'] + ( $row * $rect['h'] ) / max( 1, $rows );
@@ -1246,33 +1245,20 @@ class WOI_Admin_Order_Images {
 		$white = imagecolorallocate( $tile_img, 255, 255, 255 );
 		imagefill( $tile_img, 0, 0, $white );
 
-		$sample_x0 = $src_x0 - $left_overlap;
-		$sample_x1 = $src_x1 + $right_overlap;
-		$sample_y0 = $src_y0 - $top_overlap;
-		$sample_y1 = $src_y1 + $bottom_overlap;
-
-		$sample_x0 = max( 0, $sample_x0 );
-		$sample_y0 = max( 0, $sample_y0 );
-		$sample_x1 = min( $src_w, $sample_x1 );
-		$sample_y1 = min( $src_h, $sample_y1 );
-
-		$sample_w = max( 1, (int) round( $sample_x1 - $sample_x0 ) );
-		$sample_h = max( 1, (int) round( $sample_y1 - $sample_y0 ) );
-
-		imagecopyresampled(
+		$this->copy_tile_with_source_bleed(
 			$tile_img,
 			$source,
-			$bleed_x_px,
-			$bleed_y_px,
-			(int) round( $sample_x0 ),
-			(int) round( $sample_y0 ),
+			$src_x0,
+			$src_y0,
+			$src_x1,
+			$src_y1,
 			$visible_w_px,
 			$visible_h_px,
-			$sample_w,
-			$sample_h
+			$bleed_x_px,
+			$bleed_y_px,
+			$src_w,
+			$src_h
 		);
-
-		$this->extend_tile_bleed_from_visible( $tile_img, $bleed_x_px, $bleed_y_px, $visible_w_px, $visible_h_px );
 
 		ob_start();
 		imagejpeg( $tile_img, null, 92 );
@@ -1284,7 +1270,7 @@ class WOI_Admin_Order_Images {
 		return empty( $jpeg ) ? null : $jpeg;
 	}
 
-	private function get_print_image_url( $order_id, $item_id, $image_entry, $spec, $row = null, $col = null ) {
+	private function get_print_image_url( $order_id, $item_id, $image_entry, $spec, $row = null, $col = null, $resolved_cols = null, $resolved_rows = null ) {
 		$order  = wc_get_order( $order_id );
 		$item   = $order ? $order->get_item( $item_id ) : null;
 		$images = $item instanceof WC_Order_Item_Product ? $this->get_order_item_images( $item ) : array();
@@ -1302,20 +1288,36 @@ class WOI_Admin_Order_Images {
 			$args['col'] = (int) $col;
 		}
 
+		$args['v'] = $this->get_print_image_cache_key( $image_entry, $spec, $row, $col, $resolved_cols, $resolved_rows );
+
 		return add_query_arg( $args, admin_url( 'admin-post.php' ) );
 	}
 
-	private function log_print_debug( $context, Throwable $e ) {
-		$message = sprintf(
-			"[%s] %s: %s in %s:%d\n%s\n\n",
-			gmdate( 'c' ),
-			$context,
-			$e->getMessage(),
-			$e->getFile(),
-			$e->getLine(),
-			$e->getTraceAsString()
+	private function get_print_image_cache_key( $image_entry, $spec, $row = null, $col = null, $resolved_cols = null, $resolved_rows = null ) {
+		$payload = array(
+			'url'           => isset( $image_entry['url'] ) ? (string) $image_entry['url'] : '',
+			'crop'          => isset( $image_entry['crop'] ) && is_array( $image_entry['crop'] ) ? $image_entry['crop'] : array(),
+			'puzzle_cols'   => isset( $image_entry['puzzle_cols'] ) ? (int) $image_entry['puzzle_cols'] : 0,
+			'puzzle_rows'   => isset( $image_entry['puzzle_rows'] ) ? (int) $image_entry['puzzle_rows'] : 0,
+			'resolved_cols' => null === $resolved_cols ? null : (int) $resolved_cols,
+			'resolved_rows' => null === $resolved_rows ? null : (int) $resolved_rows,
+			'row'           => null === $row ? null : (int) $row,
+			'col'           => null === $col ? null : (int) $col,
+			'spec'          => array(
+				'is_puzzle'              => ! empty( $spec['is_puzzle'] ),
+				'visible_width'          => isset( $spec['visible_width'] ) ? (float) $spec['visible_width'] : 0.0,
+				'visible_height'         => isset( $spec['visible_height'] ) ? (float) $spec['visible_height'] : 0.0,
+				'wrap_margin'            => isset( $spec['wrap_margin'] ) ? (float) $spec['wrap_margin'] : 0.0,
+				'full_width'             => isset( $spec['full_width'] ) ? (float) $spec['full_width'] : 0.0,
+				'full_height'            => isset( $spec['full_height'] ) ? (float) $spec['full_height'] : 0.0,
+				'visible_width_percent'  => isset( $spec['visible_width_percent'] ) ? (float) $spec['visible_width_percent'] : 0.0,
+				'visible_height_percent' => isset( $spec['visible_height_percent'] ) ? (float) $spec['visible_height_percent'] : 0.0,
+				'puzzle_cols'            => isset( $spec['puzzle_cols'] ) ? (int) $spec['puzzle_cols'] : 0,
+				'puzzle_rows'            => isset( $spec['puzzle_rows'] ) ? (int) $spec['puzzle_rows'] : 0,
+			),
 		);
-		@file_put_contents( '/tmp/woi-print-debug.log', $message, FILE_APPEND );
+
+		return substr( md5( wp_json_encode( $payload ) ), 0, 12 );
 	}
 
 	private function get_order_item_by_id( $item_id ) {
@@ -1346,54 +1348,62 @@ class WOI_Admin_Order_Images {
 		return $item instanceof WC_Order_Item_Product ? $item : null;
 	}
 
-	private function build_puzzle_segments( $src_start, $src_end, $dest_total, $left_overlap, $right_overlap ) {
-		$segments = array();
-		$cursor = 0;
+	private function copy_tile_with_source_bleed( $tile_img, $source, $src_x0, $src_y0, $src_x1, $src_y1, $visible_w, $visible_h, $bleed_x, $bleed_y, $src_w, $src_h ) {
+		$src_x0 = max( 0.0, (float) $src_x0 );
+		$src_y0 = max( 0.0, (float) $src_y0 );
+		$src_x1 = min( (float) $src_w, (float) $src_x1 );
+		$src_y1 = min( (float) $src_h, (float) $src_y1 );
 
-		if ( $left_overlap > 0 ) {
-			$segments[] = array(
-				'dst_start' => $cursor,
-				'dst_len'   => $left_overlap,
-				'src_start' => $src_start - $left_overlap,
-				'src_len'   => $left_overlap,
-			);
-			$cursor += $left_overlap;
-		}
+		$available_left   = min( $bleed_x, max( 0, (int) floor( $src_x0 ) ) );
+		$available_top    = min( $bleed_y, max( 0, (int) floor( $src_y0 ) ) );
+		$available_right  = min( $bleed_x, max( 0, (int) floor( $src_w - $src_x1 ) ) );
+		$available_bottom = min( $bleed_y, max( 0, (int) floor( $src_h - $src_y1 ) ) );
 
-		$center_len = max( 1, $dest_total - $left_overlap - $right_overlap );
-		$segments[] = array(
-			'dst_start' => $cursor,
-			'dst_len'   => $center_len,
-			'src_start' => $src_start + $left_overlap,
-			'src_len'   => max( 1, ( $src_end - $src_start ) - $left_overlap - $right_overlap ),
+		$sample_x0 = max( 0, (int) round( $src_x0 - $available_left ) );
+		$sample_y0 = max( 0, (int) round( $src_y0 - $available_top ) );
+		$sample_x1 = min( $src_w, (int) round( $src_x1 + $available_right ) );
+		$sample_y1 = min( $src_h, (int) round( $src_y1 + $available_bottom ) );
+
+		$sample_w = max( 1, $sample_x1 - $sample_x0 );
+		$sample_h = max( 1, $sample_y1 - $sample_y0 );
+		$dest_x   = max( 0, $bleed_x - $available_left );
+		$dest_y   = max( 0, $bleed_y - $available_top );
+		$dest_w   = max( 1, $available_left + $visible_w + $available_right );
+		$dest_h   = max( 1, $available_top + $visible_h + $available_bottom );
+
+		imagecopyresampled(
+			$tile_img,
+			$source,
+			$dest_x,
+			$dest_y,
+			$sample_x0,
+			$sample_y0,
+			$dest_w,
+			$dest_h,
+			$sample_w,
+			$sample_h
 		);
-		$cursor += $center_len;
 
-		if ( $right_overlap > 0 ) {
-			$segments[] = array(
-				'dst_start' => $cursor,
-				'dst_len'   => $right_overlap,
-				'src_start' => $src_end,
-				'src_len'   => $right_overlap,
-			);
-		}
-
-		return $segments;
+		$this->extend_tile_edges( $tile_img, $dest_x, $dest_y, $dest_w, $dest_h );
 	}
 
-	private function extend_tile_bleed_from_visible( $tile_img, $bleed_x, $bleed_y, $visible_w, $visible_h ) {
+	private function extend_tile_edges( $tile_img, $copy_x, $copy_y, $copy_w, $copy_h ) {
+		$full_w = imagesx( $tile_img );
 		$full_h = imagesy( $tile_img );
-		$vis_x = $bleed_x;
-		$vis_y = $bleed_y;
+		$copy_right = $copy_x + $copy_w;
+		$copy_bottom = $copy_y + $copy_h;
 
-		if ( $bleed_y > 0 ) {
-			imagecopyresampled( $tile_img, $tile_img, $vis_x, 0, $vis_x, $vis_y, $visible_w, $bleed_y, $visible_w, 1 );
-			imagecopyresampled( $tile_img, $tile_img, $vis_x, $vis_y + $visible_h, $vis_x, $vis_y + $visible_h - 1, $visible_w, $bleed_y, $visible_w, 1 );
+		if ( $copy_y > 0 ) {
+			imagecopyresampled( $tile_img, $tile_img, $copy_x, 0, $copy_x, $copy_y, $copy_w, $copy_y, $copy_w, 1 );
 		}
-
-		if ( $bleed_x > 0 ) {
-			imagecopyresampled( $tile_img, $tile_img, 0, 0, $vis_x, 0, $bleed_x, $full_h, 1, $full_h );
-			imagecopyresampled( $tile_img, $tile_img, $vis_x + $visible_w, 0, $vis_x + $visible_w - 1, 0, $bleed_x, $full_h, 1, $full_h );
+		if ( $copy_bottom < $full_h ) {
+			imagecopyresampled( $tile_img, $tile_img, $copy_x, $copy_bottom, $copy_x, $copy_bottom - 1, $copy_w, $full_h - $copy_bottom, $copy_w, 1 );
+		}
+		if ( $copy_x > 0 ) {
+			imagecopyresampled( $tile_img, $tile_img, 0, 0, $copy_x, 0, $copy_x, $full_h, 1, $full_h );
+		}
+		if ( $copy_right < $full_w ) {
+			imagecopyresampled( $tile_img, $tile_img, $copy_right, 0, $copy_right - 1, 0, $full_w - $copy_right, $full_h, 1, $full_h );
 		}
 	}
 }

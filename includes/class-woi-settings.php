@@ -402,7 +402,6 @@ class WOI_Settings {
 			admin_url( 'admin.php' )
 		);
 
-		wp_safe_remote_post( wp_nonce_url( $redirect_url, 'wp_http_nonce' ) );
 		wp_redirect( $redirect_url );
 		exit;
 	}
