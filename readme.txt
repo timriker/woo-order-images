@@ -4,7 +4,7 @@ Tags: woocommerce, product images, image upload, printing, puzzle
 Requires at least: 6.8
 Tested up to: 6.9.4
 Requires PHP: 7.4
-Stable tag: 0.6.8
+Stable tag: 0.6.9
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -59,6 +59,14 @@ This plugin bundles the following third-party library:
   * https://github.com/YahnisElsts/plugin-update-checker
 
 == Changelog ==
+
+= 0.6.9 =
+* Added a release check that requires the current version to appear in the WordPress-facing `readme.txt` changelog.
+* Updated release guidance so both `CHANGELOG.md` and `readme.txt` changelog entries are required before tagging.
+
+= 0.6.8 =
+* Added release workflow validation for plugin version, `WOI_VERSION`, `Stable tag`, and changelog alignment.
+* Tightened release guidance so changelog updates happen before tagging.
 
 = 0.6.5 =
 * Added cache-busting print-image URLs and cache-friendly response headers.

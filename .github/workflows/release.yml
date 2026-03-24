@@ -47,6 +47,11 @@ jobs:
             exit 1
           fi
 
+          if ! grep -q "^= $plugin_version =$" readme.txt; then
+            echo "readme.txt changelog is missing an entry for version $plugin_version."
+            exit 1
+          fi
+
   create-release:
     if: startsWith(github.ref, 'refs/tags/')
     needs: lint

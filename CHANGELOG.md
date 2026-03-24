@@ -4,6 +4,12 @@ All notable changes to `woo-order-images` will be documented in this file.
 
 This project follows a pragmatic release history rather than a strict changelog format for older versions. Recent releases are documented in more detail.
 
+## [0.6.9] - 2026-03-24
+
+### Changed
+- Added a release workflow validation step that checks the WordPress-facing `readme.txt` changelog for the current version.
+- Tightened release guidance in project docs so both changelog files are updated before tagging.
+
 ## [0.6.8] - 2026-03-24
 
 ### Changed

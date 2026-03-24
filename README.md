@@ -140,7 +140,8 @@ Prefer REST, CLI, and direct print URLs before opening WooCommerce order edit sc
 2. Update `readme.txt` `Stable tag`
 3. Sync `readme.txt` `Tested up to` with the WordPress version used for release testing
 4. Update `CHANGELOG.md` before tagging so GitHub release notes stay in sync
-5. Tag and release from Git
+5. Update the `== Changelog ==` section in `readme.txt` so WordPress plugin details show the current release notes
+6. Tag and release from Git
 
 ## Testing
 
