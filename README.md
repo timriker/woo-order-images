@@ -139,7 +139,7 @@ Prefer REST, CLI, and direct print URLs before opening WooCommerce order edit sc
 1. Update `woo-order-images.php` version metadata
 2. Update `readme.txt` `Stable tag`
 3. Sync `readme.txt` `Tested up to` with the WordPress version used for release testing
-4. Update `CHANGELOG.md`
+4. Update `CHANGELOG.md` before tagging so GitHub release notes stay in sync
 5. Tag and release from Git
 
 ## Testing

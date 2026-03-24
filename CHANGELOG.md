@@ -4,6 +4,35 @@ All notable changes to `woo-order-images` will be documented in this file.
 
 This project follows a pragmatic release history rather than a strict changelog format for older versions. Recent releases are documented in more detail.
 
+## [0.6.8] - 2026-03-24
+
+### Changed
+- Added a release workflow validation step that checks plugin version, `WOI_VERSION`, `readme.txt` `Stable tag`, and the matching `CHANGELOG.md` entry.
+- Tightened release guidance in project docs so changelog and metadata updates are part of the normal release routine.
+
+## [0.6.7] - 2026-03-24
+
+### Added
+- Bundled `plugin-update-checker 5.6` for GitHub-based plugin update checks.
+- Added updater notices for bundled third-party dependencies.
+
+### Changed
+- Wired the plugin bootstrap to check GitHub releases and release zip assets for updates.
+- Updated release-process docs so `Tested up to`, `Stable tag`, and changelog updates are part of the normal release flow.
+- Updated `readme.txt` metadata to match the tested WordPress environment (`6.9.4`) and the current stable tag.
+
+## [0.6.6] - 2026-03-24
+
+### Added
+- Added a WordPress-style `readme.txt`.
+- Added a full GPL license file and explicit plugin license metadata.
+- Bundled local Cropper.js assets and vendor notices.
+
+### Changed
+- Updated project documentation and AI development guidance to match the current plugin workflow.
+- Updated the GitHub Actions workflow to lint on pushes to `main` and to pull release notes from `CHANGELOG.md`.
+- Normalized remaining `Woo` branding in docs and workflow text.
+
 ## [0.6.5] - 2026-03-24
 
 ### Changed
