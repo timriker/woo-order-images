@@ -1,0 +1,6 @@
+This plugin bundles the following third-party library:
+
+plugin-update-checker 5.6
+https://github.com/YahnisElsts/plugin-update-checker
+
+License: MIT

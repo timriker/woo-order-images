@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Woo Order Images
  * Description: Collects customer image uploads for WooCommerce products and generates order print sheets, including puzzle layouts.
- * Version: 0.6.6
+ * Version: 0.6.7
  * Requires at least: 6.8
  * Requires PHP: 7.4
  * Requires Plugins: woocommerce
@@ -20,7 +20,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 if ( ! defined( 'WOI_VERSION' ) ) {
-	define( 'WOI_VERSION', '0.6.6' );
+	define( 'WOI_VERSION', '0.6.7' );
 }
 
 if ( ! defined( 'WOI_PLUGIN_FILE' ) ) {
@@ -33,6 +33,22 @@ if ( ! defined( 'WOI_PLUGIN_DIR' ) ) {
 
 if ( ! defined( 'WOI_PLUGIN_URL' ) ) {
 	define( 'WOI_PLUGIN_URL', plugin_dir_url( WOI_PLUGIN_FILE ) );
+}
+
+if ( is_admin() ) {
+	$woi_update_checker_path = WOI_PLUGIN_DIR . 'vendor/plugin-update-checker/plugin-update-checker.php';
+	if ( file_exists( $woi_update_checker_path ) ) {
+		require_once $woi_update_checker_path;
+
+		if ( class_exists( '\YahnisElsts\PluginUpdateChecker\v5\PucFactory' ) ) {
+			$woi_update_checker = \YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateChecker(
+				'https://github.com/timriker/woo-order-images/',
+				WOI_PLUGIN_FILE,
+				'woo-order-images'
+			);
+			$woi_update_checker->getVcsApi()->enableReleaseAssets( '/woo-order-images-.*\.zip($|[?&#])/i' );
+		}
+	}
 }
 
 require_once WOI_PLUGIN_DIR . 'includes/class-woi-plugin.php';

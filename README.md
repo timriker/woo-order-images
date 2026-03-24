@@ -135,6 +135,13 @@ Modify the band geometry in `render_print_page()` and the supporting styles in `
 #### Debugging admin orders
 Prefer REST, CLI, and direct print URLs before opening WooCommerce order edit screens. If you do open an order in admin, do not leave it locked/open when you are done.
 
+#### Preparing a release
+1. Update `woo-order-images.php` version metadata
+2. Update `readme.txt` `Stable tag`
+3. Sync `readme.txt` `Tested up to` with the WordPress version used for release testing
+4. Update `CHANGELOG.md`
+5. Tag and release from Git
+
 ## Testing
 
 - **Cart flow**: Add WOI items with and without images; confirm checkout enforces required completion
@@ -155,6 +162,8 @@ Copyright (C) Tim Riker <timriker@gmail.com>
 See [LICENSE](LICENSE) for the repository license notice.
 
 This plugin bundles **Cropper.js 1.6.2** under the MIT license. See [assets/vendor/cropper/NOTICE.txt](assets/vendor/cropper/NOTICE.txt).
+
+This plugin also bundles **plugin-update-checker 5.6** under the MIT license for GitHub-based plugin updates. See [vendor/plugin-update-checker/license.txt](vendor/plugin-update-checker/license.txt).
 
 ## Support
 

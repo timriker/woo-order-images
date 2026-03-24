@@ -46,7 +46,7 @@ jobs:
       - name: Create plugin directory structure
         run: |
           mkdir -p release/woo-order-images
-          cp -r assets includes *.php *.md release/woo-order-images/
+          cp -r assets includes vendor *.php *.md *.txt LICENSE release/woo-order-images/
 
       - name: Create zip file
         run: |
