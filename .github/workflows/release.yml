@@ -97,9 +97,16 @@ jobs:
 
             ${{ steps.changelog.outputs.RELEASE_NOTES }}
 
-            Download `woo-order-images-${{ steps.tag_version.outputs.VERSION }}.zip` below to install on your WordPress site.
+            Sites using the bundled GitHub update checker can upgrade from the WordPress Plugins screen when this release is detected.
+            Manual zip installation is also available below if needed.
 
-            **Installation:**
+            **Upgrade:**
+            1. Open WordPress Admin → Plugins
+            2. Find **Woo Order Images**
+            3. Click **update now** when the new version is offered
+            4. Confirm the plugin version updates to `${{ steps.tag_version.outputs.VERSION }}`
+
+            **New Installation:**
             1. Download the .zip file
             2. Go to WordPress Admin → Plugins → Add New
             3. Click "Upload Plugin" and select the .zip file

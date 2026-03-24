@@ -33,6 +33,11 @@ A WooCommerce plugin for collecting customer photos on WooCommerce products, sto
 3. Configure global settings at **WooCommerce > Order Images**
 4. Set per-product image specs in the product edit screen
 
+## Upgrades
+
+Installed sites can upgrade from tagged GitHub releases through the WordPress **Plugins** screen using the bundled GitHub update checker.
+Manual zip upload is still supported for first-time installs or fallback upgrades.
+
 ## Configuration
 
 ### Plugin Settings (WooCommerce > Order Images)

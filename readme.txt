@@ -31,6 +31,11 @@ Key capabilities include:
 3. Visit `WooCommerce > Order Images` to configure global settings.
 4. Edit WooCommerce products and enable Woo Order Images where needed.
 
+== Upgrades ==
+
+Sites using the bundled GitHub update checker can upgrade from the WordPress `Plugins` screen when a newer GitHub release is available.
+Manual upgrades by uploading the release zip are still supported if needed.
+
 == Frequently Asked Questions ==
 
 = Are uploaded images cropped into new files? =
@@ -48,6 +53,11 @@ Yes. Puzzle products can split one source image across a configured grid and sup
 = Can admins re-crop after checkout? =
 
 Yes. Admins can hover order-image thumbnails and reopen the crop editor without replacing the original uploaded image.
+
+= Does the plugin support updates from GitHub releases? =
+
+Yes. The plugin bundles a GitHub update checker so installed sites can receive in-dashboard updates from tagged GitHub releases.
+Manual zip installation is still supported for first-time installs or fallback upgrades.
 
 == Third-Party Assets ==
 
