@@ -1,0 +1,7 @@
+This plugin bundles the following third-party asset:
+
+Cropper.js 1.6.2
+https://fengyuanchen.github.io/cropperjs/
+https://github.com/fengyuanchen/cropperjs
+
+License: MIT

@@ -2,12 +2,15 @@
 /**
  * Plugin Name: Woo Order Images
  * Description: Collects customer image uploads for WooCommerce products and generates order print sheets, including puzzle layouts.
- * Version: 0.6.5
+ * Version: 0.6.6
  * Requires at least: 6.8
  * Requires PHP: 7.4
  * Requires Plugins: woocommerce
  * Author: Tim Riker
  * Author URI: https://rikers.org
+ * License: GPL-2.0-or-later
+ * License URI: https://www.gnu.org/licenses/gpl-2.0.html
+ * Copyright: Tim Riker <timriker@gmail.com>
  * Text Domain: woo-order-images
  * Domain Path: /languages
  */
@@ -17,7 +20,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 if ( ! defined( 'WOI_VERSION' ) ) {
-	define( 'WOI_VERSION', '0.6.5' );
+	define( 'WOI_VERSION', '0.6.6' );
 }
 
 if ( ! defined( 'WOI_PLUGIN_FILE' ) ) {

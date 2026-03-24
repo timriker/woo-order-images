@@ -1,6 +1,6 @@
 <?php
 /**
- * WOO Order Images Uninstall Script
+ * Woo Order Images Uninstall Script
  *
  * Handles cleanup when the plugin is deleted via WordPress admin.
  */

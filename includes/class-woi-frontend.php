@@ -27,14 +27,14 @@ class WOI_Frontend {
 
 		wp_enqueue_style(
 			'woi-cropper',
-			'https://cdn.jsdelivr.net/npm/cropperjs@1.6.2/dist/cropper.min.css',
+			WOI_PLUGIN_URL . 'assets/vendor/cropper/cropper.min.css',
 			array(),
 			'1.6.2'
 		);
 
 		wp_enqueue_script(
 			'woi-cropper',
-			'https://cdn.jsdelivr.net/npm/cropperjs@1.6.2/dist/cropper.min.js',
+			WOI_PLUGIN_URL . 'assets/vendor/cropper/cropper.min.js',
 			array(),
 			'1.6.2',
 			true
