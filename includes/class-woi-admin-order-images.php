@@ -9,6 +9,7 @@ class WOI_Admin_Order_Images {
 		add_action( 'woocommerce_after_order_itemmeta', array( $this, 'render_order_item_images' ), 10, 3 );
 		add_action( 'woocommerce_order_item_meta_end', array( $this, 'render_frontend_order_item_images' ), 10, 4 );
 		add_action( 'admin_post_woi_print_sheet', array( $this, 'render_print_page' ) );
+		add_action( 'admin_post_woi_print_image', array( $this, 'render_print_image' ) );
 		add_action( 'woocommerce_order_actions_end', array( $this, 'render_order_level_print_button' ), 10, 1 );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_admin_assets' ) );
 		add_action( 'admin_footer', array( $this, 'render_admin_crop_modal' ) );
@@ -218,7 +219,7 @@ class WOI_Admin_Order_Images {
 		$puzzle_cols = isset( $_POST['puzzle_cols'] ) ? max( 0, absint( wp_unslash( $_POST['puzzle_cols'] ) ) ) : 0;
 		$puzzle_rows = isset( $_POST['puzzle_rows'] ) ? max( 0, absint( wp_unslash( $_POST['puzzle_rows'] ) ) ) : 0;
 
-		$item = wc_get_order_item( $item_id );
+		$item = $this->get_order_item_by_id( $item_id );
 		if ( ! $item instanceof WC_Order_Item_Product ) {
 			wp_send_json_error(
 				array(
@@ -309,256 +310,313 @@ class WOI_Admin_Order_Images {
 	}
 
 	public function render_print_page() {
-		if ( ! current_user_can( 'manage_woocommerce' ) ) {
-			wp_die( esc_html__( 'You do not have permission to view this page.', 'woo-order-images' ) );
-		}
-
-		$order_id = isset( $_GET['order_id'] ) ? absint( wp_unslash( $_GET['order_id'] ) ) : 0;
-		$order    = wc_get_order( $order_id );
-		if ( ! $order ) {
-			wp_die( esc_html__( 'Order not found.', 'woo-order-images' ) );
-		}
-
-		$entries = array();
-		foreach ( $order->get_items() as $item ) {
-			if ( ! $item instanceof WC_Order_Item_Product ) {
-				continue;
+		try {
+			if ( ! current_user_can( 'manage_woocommerce' ) ) {
+				wp_die( esc_html__( 'You do not have permission to view this page.', 'woo-order-images' ) );
 			}
 
-			$images = $this->get_order_item_images( $item );
-			if ( empty( $images ) ) {
-				continue;
+			$order_id = isset( $_GET['order_id'] ) ? absint( wp_unslash( $_GET['order_id'] ) ) : 0;
+			$order    = wc_get_order( $order_id );
+			if ( ! $order ) {
+				wp_die( esc_html__( 'Order not found.', 'woo-order-images' ) );
 			}
 
-			$base_spec = $this->get_item_spec( $item );
-			foreach ( $images as $image_entry ) {
-				$url  = isset( $image_entry['url'] ) ? $image_entry['url'] : '';
-				$crop = isset( $image_entry['crop'] ) && is_array( $image_entry['crop'] ) ? $image_entry['crop'] : array();
-				if ( '' === $url ) {
+			$entries = array();
+			foreach ( $order->get_items() as $item ) {
+				if ( ! $item instanceof WC_Order_Item_Product ) {
 					continue;
 				}
 
-				if ( ! empty( $base_spec['is_puzzle'] ) ) {
-					$grid = $this->resolve_puzzle_grid_for_entry( $base_spec, $url, $crop, $image_entry );
-					$cols = $grid['cols'];
-					$rows = $grid['rows'];
-					for ( $row = 0; $row < $rows; $row++ ) {
-						for ( $col = 0; $col < $cols; $col++ ) {
-							$tile_url = $this->build_puzzle_tile_data_url( $url, $crop, $base_spec, $col, $row, $cols, $rows );
-							if ( '' === $tile_url ) {
-								continue;
-							}
-							$entries[] = array(
-								'url'  => $tile_url,
-								'spec' => $base_spec,
-							);
-						}
-					}
-				} else {
-					$oriented_spec = $this->get_oriented_spec_for_crop( $base_spec, $url, $crop );
-					$print_url     = $this->build_single_tile_data_url( $url, $crop, $oriented_spec );
-					if ( '' === $print_url ) {
+				$images = $this->get_order_item_images( $item );
+				if ( empty( $images ) ) {
+					continue;
+				}
+
+				$base_spec = $this->get_item_spec( $item );
+				foreach ( $images as $image_entry ) {
+					$url  = isset( $image_entry['url'] ) ? $image_entry['url'] : '';
+					$crop = isset( $image_entry['crop'] ) && is_array( $image_entry['crop'] ) ? $image_entry['crop'] : array();
+					if ( '' === $url ) {
 						continue;
 					}
-					$entries[] = array(
-						'url'  => $print_url,
-						'spec' => $oriented_spec,
-					);
+
+					if ( ! empty( $base_spec['is_puzzle'] ) ) {
+						$grid = $this->resolve_puzzle_grid_for_entry( $base_spec, $url, $crop, $image_entry );
+						$cols = $grid['cols'];
+						$rows = $grid['rows'];
+						for ( $row = 0; $row < $rows; $row++ ) {
+							for ( $col = 0; $col < $cols; $col++ ) {
+								$entries[] = array(
+									'url'  => $this->get_print_image_url( $order->get_id(), $item->get_id(), $image_entry, $base_spec, $row, $col ),
+									'spec' => $base_spec,
+								);
+							}
+						}
+					} else {
+						$oriented_spec = $this->get_oriented_spec_for_crop( $base_spec, $url, $crop );
+						$entries[] = array(
+							'url'  => $this->get_print_image_url( $order->get_id(), $item->get_id(), $image_entry, $oriented_spec ),
+							'spec' => $oriented_spec,
+						);
+					}
 				}
 			}
-		}
 
-		if ( empty( $entries ) ) {
-			wp_die( esc_html__( 'No order images found for this order.', 'woo-order-images' ) );
-		}
-
-		$watermark_text = WOI_Settings::get_watermark_text();
-		$margin_top     = WOI_Settings::get_print_margin_top();
-		$margin_right   = WOI_Settings::get_print_margin_right();
-		$margin_bottom  = WOI_Settings::get_print_margin_bottom();
-		$margin_left    = WOI_Settings::get_print_margin_left();
-		$gap            = WOI_Settings::get_print_gap();
-
-		// Get page dimensions from settings, calculate printable area.
-		$page_size_key  = WOI_Settings::get_print_page_size();
-		$page_dims      = WOI_Settings::get_page_size_dimensions( $page_size_key );
-		$full_page_w    = $page_dims['width'];
-		$full_page_h    = $page_dims['height'];
-		$page_width     = $full_page_w - $margin_left - $margin_right;
-		$page_height    = $full_page_h - $margin_top - $margin_bottom;
-
-		$pages       = array();
-		$current     = array();
-		$current_y   = 0.0;
-		$row_items   = array();
-		$row_width   = 0.0;
-		$row_height  = 0.0;
-
-		$flush_row = function () use ( &$current, &$current_y, &$row_items, &$row_width, &$row_height, $page_width, $gap ) {
-			if ( empty( $row_items ) ) {
-				return;
+			if ( empty( $entries ) ) {
+				wp_die( esc_html__( 'No order images found for this order.', 'woo-order-images' ) );
 			}
 
-			$tile_count = count( $row_items );
-			$total_gaps = max( 0, $tile_count - 1 );
-			$used_width = $row_width + ( $total_gaps * $gap );
-			$start_x    = max( 0.0, ( $page_width - $used_width ) / 2 );
-			$x          = $start_x;
+			$watermark_text = WOI_Settings::get_watermark_text();
+			$margin_top     = WOI_Settings::get_print_margin_top();
+			$margin_right   = WOI_Settings::get_print_margin_right();
+			$margin_bottom  = WOI_Settings::get_print_margin_bottom();
+			$margin_left    = WOI_Settings::get_print_margin_left();
+			$gap            = WOI_Settings::get_print_gap();
 
-			foreach ( $row_items as $index => $row_item ) {
-				$row_items[ $index ]['x'] = $x;
-				$row_items[ $index ]['y'] = $current_y;
-				$current[]                = $row_items[ $index ];
-				$x += $row_item['w'] + $gap;
-			}
+			$page_size_key  = WOI_Settings::get_print_page_size();
+			$page_dims      = WOI_Settings::get_page_size_dimensions( $page_size_key );
+			$full_page_w    = $page_dims['width'];
+			$full_page_h    = $page_dims['height'];
+			$page_width     = $full_page_w - $margin_left - $margin_right;
+			$page_height    = $full_page_h - $margin_top - $margin_bottom;
 
-			$current_y += $row_height + $gap;
-			$row_items = array();
-			$row_width = 0.0;
-			$row_height = 0.0;
-		};
+			$pages       = array();
+			$current     = array();
+			$current_y   = 0.0;
+			$row_items   = array();
+			$row_width   = 0.0;
+			$row_height  = 0.0;
 
-		$flush_page = function () use ( &$pages, &$current, &$current_y, &$row_items, &$row_width, &$row_height, $flush_row ) {
-			$flush_row();
-			if ( ! empty( $current ) ) {
-				$pages[] = $current;
-			}
-			$current    = array();
-			$current_y  = 0.0;
-			$row_items  = array();
-			$row_width  = 0.0;
-			$row_height = 0.0;
-		};
+			$flush_row = function () use ( &$current, &$current_y, &$row_items, &$row_width, &$row_height, $page_width, $gap ) {
+				if ( empty( $row_items ) ) {
+					return;
+				}
 
-		foreach ( $entries as $entry ) {
-			$spec       = $entry['spec'];
-			$tile_w_in  = (float) $spec['full_width'];
-			$tile_h_in  = (float) $spec['full_height'];
-			if ( $tile_w_in <= 0 || $tile_h_in <= 0 ) {
-				continue;
-			}
+				$tile_count = count( $row_items );
+				$total_gaps = max( 0, $tile_count - 1 );
+				$used_width = $row_width + ( $total_gaps * $gap );
+				$start_x    = max( 0.0, ( $page_width - $used_width ) / 2 );
+				$x          = $start_x;
 
-			$tile = array(
-				'url'  => $entry['url'],
-				'spec' => $spec,
-				'w'    => $tile_w_in,
-				'h'    => $tile_h_in,
-				'x'    => 0.0,
-				'y'    => 0.0,
-			);
+				foreach ( $row_items as $index => $row_item ) {
+					$row_items[ $index ]['x'] = $x;
+					$row_items[ $index ]['y'] = $current_y;
+					$current[]                = $row_items[ $index ];
+					$x += $row_item['w'] + $gap;
+				}
 
-			$next_row_width = empty( $row_items ) ? $tile_w_in : ( $row_width + $gap + $tile_w_in );
-			if ( $next_row_width > $page_width + 0.0001 ) {
+				$current_y += $row_height + $gap;
+				$row_items = array();
+				$row_width = 0.0;
+				$row_height = 0.0;
+			};
+
+			$flush_page = function () use ( &$pages, &$current, &$current_y, &$row_items, &$row_width, &$row_height, $flush_row ) {
 				$flush_row();
-				$next_row_width = $tile_w_in;
+				if ( ! empty( $current ) ) {
+					$pages[] = $current;
+				}
+				$current    = array();
+				$current_y  = 0.0;
+				$row_items  = array();
+				$row_width  = 0.0;
+				$row_height = 0.0;
+			};
+
+			foreach ( $entries as $entry ) {
+				$spec       = $entry['spec'];
+				$tile_w_in  = (float) $spec['full_width'];
+				$tile_h_in  = (float) $spec['full_height'];
+				if ( $tile_w_in <= 0 || $tile_h_in <= 0 ) {
+					continue;
+				}
+
+				$tile = array(
+					'url'  => $entry['url'],
+					'spec' => $spec,
+					'w'    => $tile_w_in,
+					'h'    => $tile_h_in,
+					'x'    => 0.0,
+					'y'    => 0.0,
+				);
+
+				$next_row_width = empty( $row_items ) ? $tile_w_in : ( $row_width + $gap + $tile_w_in );
+				if ( $next_row_width > $page_width + 0.0001 ) {
+					$flush_row();
+					$next_row_width = $tile_w_in;
+				}
+
+				$next_row_height = max( $row_height, $tile_h_in );
+				$row_top         = $current_y;
+				$row_bottom      = $row_top + $next_row_height;
+				if ( $row_bottom > $page_height + 0.0001 ) {
+					$flush_page();
+					$next_row_width  = $tile_w_in;
+					$next_row_height = $tile_h_in;
+				}
+
+				if ( $tile_h_in > $page_height + 0.0001 ) {
+					continue;
+				}
+
+				$row_items[] = $tile;
+				$row_width   = $next_row_width;
+				$row_height  = $next_row_height;
 			}
 
-			$next_row_height = max( $row_height, $tile_h_in );
-			$row_top         = $current_y;
-			$row_bottom      = $row_top + $next_row_height;
-			if ( $row_bottom > $page_height + 0.0001 ) {
-				$flush_page();
-				$next_row_width  = $tile_w_in;
-				$next_row_height = $tile_h_in;
-			}
+			$flush_page();
 
-			if ( $tile_h_in > $page_height + 0.0001 ) {
-				continue;
-			}
+			header( 'Content-Type: text/html; charset=' . get_option( 'blog_charset' ) );
+			echo '<!doctype html><html><head><meta charset="' . esc_attr( get_option( 'blog_charset' ) ) . '">';
+			echo '<title>' . esc_html__( 'WOI Print Sheet', 'woo-order-images' ) . '</title>';
+			echo '<style>';
+			echo '@page{';
+			echo 'margin:' . esc_attr( $margin_top ) . 'in ' . esc_attr( $margin_right ) . 'in ' . esc_attr( $margin_bottom ) . 'in ' . esc_attr( $margin_left ) . 'in;';
+			echo 'size:' . esc_attr( $this->format_num( $full_page_w ) ) . 'in ' . esc_attr( $this->format_num( $full_page_h ) ) . 'in;';
+			echo '-webkit-print-color-adjust:exact !important;';
+			echo 'print-color-adjust:exact !important;';
+			echo '}';
+			echo '@media print{';
+			echo '*{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}';
+			echo 'html,body{margin:0;padding:0;background:#fff;}';
+			echo '.woi-sheet-grid{gap:0.1in;}';
+			echo '}';
+			echo '</style>';
+			echo '<link rel="stylesheet" href="' . esc_url( WOI_PLUGIN_URL . 'assets/css/print-sheet.css?ver=' . rawurlencode( WOI_VERSION ) ) . '">';
+			echo '</head><body>';
 
-			$row_items[] = $tile;
-			$row_width   = $next_row_width;
-			$row_height  = $next_row_height;
-		}
+			$page_count = count( $pages );
+			foreach ( $pages as $page_index => $tiles ) {
+				$is_last   = ( $page_index === $page_count - 1 );
+				$brk_style = $is_last ? '' : 'page-break-after:always;break-after:page;';
+				echo '<div class="woi-sheet-grid" style="width:' . esc_attr( $this->format_num( $page_width ) ) . 'in;height:' . esc_attr( $this->format_num( $page_height ) ) . 'in;display:block;position:relative;overflow:hidden;' . $brk_style . '">';
 
-		$flush_page();
+				foreach ( $tiles as $tile ) {
+					$spec          = $tile['spec'];
+					$url           = $tile['url'];
+					$left_pct      = ( 100 - $spec['visible_width_percent'] ) / 2;
+					$top_pct       = ( 100 - $spec['visible_height_percent'] ) / 2;
+					$expand_x      = $left_pct * 0.125;
+					$expand_y      = $top_pct * 0.125;
+					$window_left   = max( 0, $left_pct - $expand_x );
+					$window_top    = max( 0, $top_pct - $expand_y );
+					$window_width  = min( 100, $spec['visible_width_percent'] + ( 2 * $expand_x ) );
+					$window_height = min( 100, $spec['visible_height_percent'] + ( 2 * $expand_y ) );
+					$window_right  = min( 100, $window_left + $window_width );
+					$window_bottom = min( 100, $window_top + $window_height );
+					$corner_cut_x  = min( 49.999, ( 2 * $spec['wrap_margin'] / max( 0.0001, $spec['full_width'] ) ) * 100 );
+					$corner_cut_y  = min( 49.999, ( 2 * $spec['wrap_margin'] / max( 0.0001, $spec['full_height'] ) ) * 100 );
+					$clip_polygon  = $this->get_cut_polygon_css( $corner_cut_x, $corner_cut_y );
+					$cut_outline   = $this->get_cut_polygon_svg( $corner_cut_x, $corner_cut_y );
 
-		header( 'Content-Type: text/html; charset=' . get_option( 'blog_charset' ) );
-		echo '<!doctype html><html><head><meta charset="' . esc_attr( get_option( 'blog_charset' ) ) . '">';
-		echo '<title>' . esc_html__( 'WOI Print Sheet', 'woo-order-images' ) . '</title>';
-		echo '<style>';
-		echo '@page{';
-		echo 'margin:' . esc_attr( $margin_top ) . 'in ' . esc_attr( $margin_right ) . 'in ' . esc_attr( $margin_bottom ) . 'in ' . esc_attr( $margin_left ) . 'in;';
-		echo 'size:' . esc_attr( $this->format_num( $full_page_w ) ) . 'in ' . esc_attr( $this->format_num( $full_page_h ) ) . 'in;';
-		echo '-webkit-print-color-adjust:exact !important;';
-		echo 'print-color-adjust:exact !important;';
-		echo '}';
-		echo '@media print{';
-		echo '*{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}';
-		echo 'html,body{margin:0;padding:0;background:#fff;}';
-		echo '.woi-sheet-grid{gap:0.1in;}';
-		echo '}';
-		echo '</style>';
-		echo '<link rel="stylesheet" href="' . esc_url( WOI_PLUGIN_URL . 'assets/css/print-sheet.css?ver=' . rawurlencode( WOI_VERSION ) ) . '">';
-		echo '</head><body>';
+					$top_safe        = max( 0, $window_top );
+					$bottom_safe     = max( 0, 100 - $window_bottom );
+					$left_safe       = max( 0, $window_left );
+					$right_safe      = max( 0, 100 - $window_right );
+					$top_band_top    = 0;
+					$top_band_height = $top_safe;
+					$bottom_band_bottom = 0;
+					$bottom_band_height = $bottom_safe;
+					$left_band_left  = 0;
+					$left_band_width = $left_safe;
+					$right_band_right = 0;
+					$right_band_width = $right_safe;
+					$image_width     = $this->format_pct( 10000 / max( 0.0001, $window_width ) );
+					$image_height    = $this->format_pct( 10000 / max( 0.0001, $window_height ) );
+					$image_left      = $this->format_pct( -100 * $window_left / max( 0.0001, $window_width ) );
+					$image_top       = $this->format_pct( -100 * $window_top / max( 0.0001, $window_height ) );
 
-		$page_count = count( $pages );
-		foreach ( $pages as $page_index => $tiles ) {
-			$is_last   = ( $page_index === $page_count - 1 );
-			$brk_style = $is_last ? '' : 'page-break-after:always;break-after:page;';
-			echo '<div class="woi-sheet-grid" style="width:' . esc_attr( $this->format_num( $page_width ) ) . 'in;height:' . esc_attr( $this->format_num( $page_height ) ) . 'in;display:block;position:relative;overflow:hidden;' . $brk_style . '">';
+					echo '<div class="woi-tile" style="position:absolute;left:' . esc_attr( $this->format_num( $tile['x'] ) ) . 'in;top:' . esc_attr( $this->format_num( $tile['y'] ) ) . 'in;width:' . esc_attr( $this->format_num( $tile['w'] ) ) . 'in;height:' . esc_attr( $this->format_num( $tile['h'] ) ) . 'in;">';
+					echo '<div class="woi-bleed" style="aspect-ratio:' . esc_attr( $spec['full_width'] ) . ' / ' . esc_attr( $spec['full_height'] ) . ';clip-path:polygon(' . esc_attr( $clip_polygon ) . ');">';
+					echo '<div class="woi-visible-window" style="left:' . esc_attr( $this->format_pct( $window_left ) ) . ';top:' . esc_attr( $this->format_pct( $window_top ) ) . ';width:' . esc_attr( $this->format_pct( $window_width ) ) . ';height:' . esc_attr( $this->format_pct( $window_height ) ) . ';">';
+					echo '<img src="' . esc_attr( $url ) . '" alt="" style="left:' . esc_attr( $image_left ) . ';top:' . esc_attr( $image_top ) . ';width:' . esc_attr( $image_width ) . ';height:' . esc_attr( $image_height ) . ';">';
+					echo '</div>';
 
-			foreach ( $tiles as $tile ) {
-				$spec          = $tile['spec'];
-				$url           = $tile['url'];
-				$left_pct      = ( 100 - $spec['visible_width_percent'] ) / 2;
-				$top_pct       = ( 100 - $spec['visible_height_percent'] ) / 2;
-				$expand_x      = $left_pct * 0.125;
-				$expand_y      = $top_pct * 0.125;
-				$window_left   = max( 0, $left_pct - $expand_x );
-				$window_top    = max( 0, $top_pct - $expand_y );
-				$window_width  = min( 100, $spec['visible_width_percent'] + ( 2 * $expand_x ) );
-				$window_height = min( 100, $spec['visible_height_percent'] + ( 2 * $expand_y ) );
-				$window_right  = min( 100, $window_left + $window_width );
-				$window_bottom = min( 100, $window_top + $window_height );
-				$corner_cut_x  = min( 49.999, ( 2 * $spec['wrap_margin'] / max( 0.0001, $spec['full_width'] ) ) * 100 );
-				$corner_cut_y  = min( 49.999, ( 2 * $spec['wrap_margin'] / max( 0.0001, $spec['full_height'] ) ) * 100 );
-				$clip_polygon  = $this->get_cut_polygon_css( $corner_cut_x, $corner_cut_y );
-				$cut_outline   = $this->get_cut_polygon_svg( $corner_cut_x, $corner_cut_y );
+					if ( '' !== trim( $watermark_text ) ) {
+						$wm_font_pt = $this->format_num( max( 4, $spec['wrap_margin'] * 19.2 ) );
+						$wm_style   = 'font-size:' . esc_attr( $wm_font_pt ) . 'pt;';
+						echo '<div class="woi-watermark-band woi-watermark-top" style="left:0;top:' . esc_attr( $this->format_pct( $top_band_top ) ) . ';width:100%;height:' . esc_attr( $this->format_pct( $top_band_height ) ) . ';"><span style="' . $wm_style . '">' . esc_html( $watermark_text ) . '</span></div>';
+						echo '<div class="woi-watermark-band woi-watermark-bottom" style="left:0;bottom:' . esc_attr( $this->format_pct( $bottom_band_bottom ) ) . ';width:100%;height:' . esc_attr( $this->format_pct( $bottom_band_height ) ) . ';"><span style="' . $wm_style . '">' . esc_html( $watermark_text ) . '</span></div>';
+						echo '<div class="woi-watermark-band woi-watermark-left" style="left:' . esc_attr( $this->format_pct( $left_band_left ) ) . ';top:' . esc_attr( $this->format_pct( $top_pct ) ) . ';width:' . esc_attr( $this->format_pct( $left_band_width ) ) . ';height:' . esc_attr( $this->format_pct( $spec['visible_height_percent'] ) ) . ';"><span style="' . $wm_style . '">' . esc_html( $watermark_text ) . '</span></div>';
+						echo '<div class="woi-watermark-band woi-watermark-right" style="right:' . esc_attr( $this->format_pct( $right_band_right ) ) . ';top:' . esc_attr( $this->format_pct( $top_pct ) ) . ';width:' . esc_attr( $this->format_pct( $right_band_width ) ) . ';height:' . esc_attr( $this->format_pct( $spec['visible_height_percent'] ) ) . ';"><span style="' . $wm_style . '">' . esc_html( $watermark_text ) . '</span></div>';
+					}
 
-				$top_safe        = max( 0, $window_top );
-				$bottom_safe     = max( 0, 100 - $window_bottom );
-				$left_safe       = max( 0, $window_left );
-				$right_safe      = max( 0, 100 - $window_right );
-				$top_band_top    = 0;
-				$top_band_height = $top_safe;
-				$bottom_band_bottom = 0;
-				$bottom_band_height = $bottom_safe;
-				$left_band_left  = 0;
-				$left_band_width = $left_safe;
-				$right_band_right = 0;
-				$right_band_width = $right_safe;
-				$image_width     = $this->format_pct( 10000 / max( 0.0001, $window_width ) );
-				$image_height    = $this->format_pct( 10000 / max( 0.0001, $window_height ) );
-				$image_left      = $this->format_pct( -100 * $window_left / max( 0.0001, $window_width ) );
-				$image_top       = $this->format_pct( -100 * $window_top / max( 0.0001, $window_height ) );
-
-				echo '<div class="woi-tile" style="position:absolute;left:' . esc_attr( $this->format_num( $tile['x'] ) ) . 'in;top:' . esc_attr( $this->format_num( $tile['y'] ) ) . 'in;width:' . esc_attr( $this->format_num( $tile['w'] ) ) . 'in;height:' . esc_attr( $this->format_num( $tile['h'] ) ) . 'in;">';
-				echo '<div class="woi-bleed" style="aspect-ratio:' . esc_attr( $spec['full_width'] ) . ' / ' . esc_attr( $spec['full_height'] ) . ';clip-path:polygon(' . esc_attr( $clip_polygon ) . ');">';
-				echo '<div class="woi-visible-window" style="left:' . esc_attr( $this->format_pct( $window_left ) ) . ';top:' . esc_attr( $this->format_pct( $window_top ) ) . ';width:' . esc_attr( $this->format_pct( $window_width ) ) . ';height:' . esc_attr( $this->format_pct( $window_height ) ) . ';">';
-				echo '<img src="' . esc_attr( $url ) . '" alt="" style="left:' . esc_attr( $image_left ) . ';top:' . esc_attr( $image_top ) . ';width:' . esc_attr( $image_width ) . ';height:' . esc_attr( $image_height ) . ';">';
-				echo '</div>';
-
-				if ( '' !== trim( $watermark_text ) ) {
-					// Keep the watermark modest relative to the bleed tab and slightly smaller than before.
-					$wm_font_pt = $this->format_num( max( 4, $spec['wrap_margin'] * 19.2 ) );
-					$wm_style   = 'font-size:' . esc_attr( $wm_font_pt ) . 'pt;';
-					echo '<div class="woi-watermark-band woi-watermark-top" style="left:0;top:' . esc_attr( $this->format_pct( $top_band_top ) ) . ';width:100%;height:' . esc_attr( $this->format_pct( $top_band_height ) ) . ';"><span style="' . $wm_style . '">' . esc_html( $watermark_text ) . '</span></div>';
-					echo '<div class="woi-watermark-band woi-watermark-bottom" style="left:0;bottom:' . esc_attr( $this->format_pct( $bottom_band_bottom ) ) . ';width:100%;height:' . esc_attr( $this->format_pct( $bottom_band_height ) ) . ';"><span style="' . $wm_style . '">' . esc_html( $watermark_text ) . '</span></div>';
-					echo '<div class="woi-watermark-band woi-watermark-left" style="left:' . esc_attr( $this->format_pct( $left_band_left ) ) . ';top:' . esc_attr( $this->format_pct( $top_pct ) ) . ';width:' . esc_attr( $this->format_pct( $left_band_width ) ) . ';height:' . esc_attr( $this->format_pct( $spec['visible_height_percent'] ) ) . ';"><span style="' . $wm_style . '">' . esc_html( $watermark_text ) . '</span></div>';
-					echo '<div class="woi-watermark-band woi-watermark-right" style="right:' . esc_attr( $this->format_pct( $right_band_right ) ) . ';top:' . esc_attr( $this->format_pct( $top_pct ) ) . ';width:' . esc_attr( $this->format_pct( $right_band_width ) ) . ';height:' . esc_attr( $this->format_pct( $spec['visible_height_percent'] ) ) . ';"><span style="' . $wm_style . '">' . esc_html( $watermark_text ) . '</span></div>';
+					echo '</div>';
+					echo '<div class="woi-cut-outline"><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polygon points="' . esc_attr( $cut_outline ) . '" fill="none" stroke="#000" stroke-width="0.7" vector-effect="non-scaling-stroke" /></svg></div>';
+					echo '</div>';
 				}
 
 				echo '</div>';
-				echo '<div class="woi-cut-outline"><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polygon points="' . esc_attr( $cut_outline ) . '" fill="none" stroke="#000" stroke-width="0.7" vector-effect="non-scaling-stroke" /></svg></div>';
-				echo '</div>';
 			}
 
-			echo '</div>';
+			echo '</body></html>';
+			exit;
+		} catch ( Throwable $e ) {
+			$this->log_print_debug( 'render_print_page', $e );
+			wp_die( esc_html__( 'Unable to render the print sheet right now.', 'woo-order-images' ) );
 		}
+	}
 
-		echo '</body></html>';
-		exit;
+	public function render_print_image() {
+		try {
+			if ( ! current_user_can( 'manage_woocommerce' ) ) {
+				wp_die( esc_html__( 'You do not have permission to view this image.', 'woo-order-images' ) );
+			}
+
+			$order_id    = isset( $_GET['order_id'] ) ? absint( wp_unslash( $_GET['order_id'] ) ) : 0;
+			$item_id     = isset( $_GET['item_id'] ) ? absint( wp_unslash( $_GET['item_id'] ) ) : 0;
+			$image_index = isset( $_GET['image_index'] ) ? absint( wp_unslash( $_GET['image_index'] ) ) : -1;
+			$row         = isset( $_GET['row'] ) ? absint( wp_unslash( $_GET['row'] ) ) : -1;
+			$col         = isset( $_GET['col'] ) ? absint( wp_unslash( $_GET['col'] ) ) : -1;
+
+			$order = wc_get_order( $order_id );
+			if ( ! $order ) {
+				wp_die( esc_html__( 'Order not found.', 'woo-order-images' ) );
+			}
+
+			$item = $order->get_item( $item_id );
+			if ( ! $item instanceof WC_Order_Item_Product ) {
+				wp_die( esc_html__( 'Order item not found.', 'woo-order-images' ) );
+			}
+
+			$images = $this->get_order_item_images( $item );
+			if ( ! isset( $images[ $image_index ] ) ) {
+				wp_die( esc_html__( 'Order image not found.', 'woo-order-images' ) );
+			}
+
+			$image_entry = $images[ $image_index ];
+			$url         = isset( $image_entry['url'] ) ? (string) $image_entry['url'] : '';
+			$crop        = isset( $image_entry['crop'] ) && is_array( $image_entry['crop'] ) ? $image_entry['crop'] : array();
+			if ( '' === $url ) {
+				wp_die( esc_html__( 'Order image not found.', 'woo-order-images' ) );
+			}
+
+			$base_spec = $this->get_item_spec( $item );
+			if ( ! empty( $base_spec['is_puzzle'] ) ) {
+				$grid = $this->resolve_puzzle_grid_for_entry( $base_spec, $url, $crop, $image_entry );
+				if ( $row < 0 || $col < 0 || $row >= $grid['rows'] || $col >= $grid['cols'] ) {
+					wp_die( esc_html__( 'Puzzle tile not found.', 'woo-order-images' ) );
+				}
+
+				$jpeg = $this->build_puzzle_tile_jpeg( $url, $crop, $base_spec, $col, $row, $grid['cols'], $grid['rows'] );
+			} else {
+				$spec = $this->get_oriented_spec_for_crop( $base_spec, $url, $crop );
+				$jpeg = $this->build_single_tile_jpeg( $url, $crop, $spec );
+			}
+
+			if ( empty( $jpeg ) ) {
+				wp_die( esc_html__( 'Unable to generate the print image.', 'woo-order-images' ) );
+			}
+
+			nocache_headers();
+			header( 'Content-Type: image/jpeg' );
+			header( 'Content-Length: ' . strlen( $jpeg ) );
+			echo $jpeg; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+			exit;
+		} catch ( Throwable $e ) {
+			$this->log_print_debug( 'render_print_image', $e );
+			wp_die( esc_html__( 'Unable to render the print image right now.', 'woo-order-images' ) );
+		}
 	}
 
 	private function get_order_item_images( $item ) {
@@ -718,36 +776,45 @@ class WOI_Admin_Order_Images {
 	}
 
 	private function build_single_tile_data_url( $source_url, $crop, $spec ) {
-		$path = $this->url_to_upload_path( $source_url );
-		if ( ! $path || ! is_file( $path ) ) {
+		$jpeg = $this->build_single_tile_jpeg( $source_url, $crop, $spec );
+		if ( empty( $jpeg ) ) {
 			return '';
 		}
 
+		return 'data:image/jpeg;base64,' . base64_encode( $jpeg );
+	}
+
+	private function build_single_tile_jpeg( $source_url, $crop, $spec ) {
+		$path = $this->url_to_upload_path( $source_url );
+		if ( ! $path || ! is_file( $path ) ) {
+			return null;
+		}
+
 		if ( ! function_exists( 'imagecreatefromstring' ) || ! function_exists( 'imagecreatetruecolor' ) ) {
-			return '';
+			return null;
 		}
 
 		$raw = @file_get_contents( $path );
 		if ( false === $raw || '' === $raw ) {
-			return '';
+			return null;
 		}
 
 		$source = @imagecreatefromstring( $raw );
 		if ( ! $source ) {
-			return '';
+			return null;
 		}
 
 		$src_w = imagesx( $source );
 		$src_h = imagesy( $source );
 		if ( $src_w <= 0 || $src_h <= 0 ) {
 			imagedestroy( $source );
-			return '';
+			return null;
 		}
 
 		$rect = $this->normalize_crop_rect( $crop, $src_w, $src_h );
 		if ( $rect['w'] <= 0 || $rect['h'] <= 0 ) {
 			imagedestroy( $source );
-			return '';
+			return null;
 		}
 
 		$target_aspect = max( 0.0001, (float) $spec['visible_width'] / max( 0.0001, (float) $spec['visible_height'] ) );
@@ -772,7 +839,7 @@ class WOI_Admin_Order_Images {
 		$tile_img = imagecreatetruecolor( $full_w_px, $full_h_px );
 		if ( ! $tile_img ) {
 			imagedestroy( $source );
-			return '';
+			return null;
 		}
 
 		$white = imagecolorallocate( $tile_img, 255, 255, 255 );
@@ -800,11 +867,7 @@ class WOI_Admin_Order_Images {
 		imagedestroy( $tile_img );
 		imagedestroy( $source );
 
-		if ( empty( $jpeg ) ) {
-			return '';
-		}
-
-		return 'data:image/jpeg;base64,' . base64_encode( $jpeg );
+		return empty( $jpeg ) ? null : $jpeg;
 	}
 
 	private function get_image_ratio_from_url( $url ) {
@@ -1100,36 +1163,45 @@ class WOI_Admin_Order_Images {
 	}
 
 	private function build_puzzle_tile_data_url( $source_url, $crop, $spec, $col, $row, $cols, $rows ) {
-		$path = $this->url_to_upload_path( $source_url );
-		if ( ! $path || ! is_file( $path ) ) {
+		$jpeg = $this->build_puzzle_tile_jpeg( $source_url, $crop, $spec, $col, $row, $cols, $rows );
+		if ( empty( $jpeg ) ) {
 			return '';
 		}
 
+		return 'data:image/jpeg;base64,' . base64_encode( $jpeg );
+	}
+
+	private function build_puzzle_tile_jpeg( $source_url, $crop, $spec, $col, $row, $cols, $rows ) {
+		$path = $this->url_to_upload_path( $source_url );
+		if ( ! $path || ! is_file( $path ) ) {
+			return null;
+		}
+
 		if ( ! function_exists( 'imagecreatefromstring' ) || ! function_exists( 'imagecreatetruecolor' ) ) {
-			return '';
+			return null;
 		}
 
 		$raw = @file_get_contents( $path );
 		if ( false === $raw || '' === $raw ) {
-			return '';
+			return null;
 		}
 
 		$source = @imagecreatefromstring( $raw );
 		if ( ! $source ) {
-			return '';
+			return null;
 		}
 
 		$src_w = imagesx( $source );
 		$src_h = imagesy( $source );
 		if ( $src_w <= 0 || $src_h <= 0 ) {
 			imagedestroy( $source );
-			return '';
+			return null;
 		}
 
 		$rect = $this->normalize_crop_rect( $crop, $src_w, $src_h );
 		if ( $rect['w'] <= 0 || $rect['h'] <= 0 ) {
 			imagedestroy( $source );
-			return '';
+			return null;
 		}
 
 		$target_aspect = ( max( 1, (int) $cols ) * max( 0.0001, (float) $spec['visible_width'] ) ) / ( max( 1, (int) $rows ) * max( 0.0001, (float) $spec['visible_height'] ) );
@@ -1168,7 +1240,7 @@ class WOI_Admin_Order_Images {
 		$tile_img = imagecreatetruecolor( $full_w_px, $full_h_px );
 		if ( ! $tile_img ) {
 			imagedestroy( $source );
-			return '';
+			return null;
 		}
 
 		$white = imagecolorallocate( $tile_img, 255, 255, 255 );
@@ -1209,11 +1281,69 @@ class WOI_Admin_Order_Images {
 		imagedestroy( $tile_img );
 		imagedestroy( $source );
 
-		if ( empty( $jpeg ) ) {
-			return '';
+		return empty( $jpeg ) ? null : $jpeg;
+	}
+
+	private function get_print_image_url( $order_id, $item_id, $image_entry, $spec, $row = null, $col = null ) {
+		$order  = wc_get_order( $order_id );
+		$item   = $order ? $order->get_item( $item_id ) : null;
+		$images = $item instanceof WC_Order_Item_Product ? $this->get_order_item_images( $item ) : array();
+		$index  = array_search( $image_entry, $images, true );
+
+		$args = array(
+			'action'      => 'woi_print_image',
+			'order_id'    => $order_id,
+			'item_id'     => $item_id,
+			'image_index' => false === $index ? 0 : (int) $index,
+		);
+
+		if ( ! empty( $spec['is_puzzle'] ) && null !== $row && null !== $col ) {
+			$args['row'] = (int) $row;
+			$args['col'] = (int) $col;
 		}
 
-		return 'data:image/jpeg;base64,' . base64_encode( $jpeg );
+		return add_query_arg( $args, admin_url( 'admin-post.php' ) );
+	}
+
+	private function log_print_debug( $context, Throwable $e ) {
+		$message = sprintf(
+			"[%s] %s: %s in %s:%d\n%s\n\n",
+			gmdate( 'c' ),
+			$context,
+			$e->getMessage(),
+			$e->getFile(),
+			$e->getLine(),
+			$e->getTraceAsString()
+		);
+		@file_put_contents( '/tmp/woi-print-debug.log', $message, FILE_APPEND );
+	}
+
+	private function get_order_item_by_id( $item_id ) {
+		$item_id = absint( $item_id );
+		if ( $item_id <= 0 ) {
+			return null;
+		}
+
+		global $wpdb;
+
+		$order_id = (int) $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT order_id FROM {$wpdb->prefix}woocommerce_order_items WHERE order_item_id = %d LIMIT 1",
+				$item_id
+			)
+		);
+
+		if ( $order_id <= 0 ) {
+			return null;
+		}
+
+		$order = wc_get_order( $order_id );
+		if ( ! $order ) {
+			return null;
+		}
+
+		$item = $order->get_item( $item_id );
+		return $item instanceof WC_Order_Item_Product ? $item : null;
 	}
 
 	private function build_puzzle_segments( $src_start, $src_end, $dest_total, $left_overlap, $right_overlap ) {
