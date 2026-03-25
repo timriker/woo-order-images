@@ -4,6 +4,11 @@ All notable changes to `woo-order-images` will be documented in this file.
 
 This project follows a pragmatic release history rather than a strict changelog format for older versions. Recent releases are documented in more detail.
 
+## [0.6.10] - 2026-03-25
+
+### Fixed
+- Corrected GitHub repository link in plugin details from `bestlifemagnets/woo-order-images` to `timriker/woo-order-images`.
+
 ## [0.6.9] - 2026-03-24
 
 ### Changed
