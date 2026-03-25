@@ -4,7 +4,7 @@ Tags: woocommerce, product images, image upload, printing, puzzle
 Requires at least: 6.8
 Tested up to: 6.9.4
 Requires PHP: 7.4
-Stable tag: 0.6.9
+Stable tag: 0.6.10
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -69,6 +69,9 @@ This plugin bundles the following third-party library:
   * https://github.com/YahnisElsts/plugin-update-checker
 
 == Changelog ==
+
+= 0.6.10 =
+* Fixed GitHub repository link in plugin details from `bestlifemagnets/woo-order-images` to `timriker/woo-order-images`.
 
 = 0.6.9 =
 * Added a release check that requires the current version to appear in the WordPress-facing `readme.txt` changelog.
