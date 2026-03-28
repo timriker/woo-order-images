@@ -9,6 +9,8 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 	exit;
 }
 
+$delete_data_on_uninstall = get_option( 'woi_delete_data_on_uninstall', 'no' );
+
 // Delete all WOI settings options.
 $options_to_delete = array(
 	'woi_watermark_text',
@@ -19,20 +21,36 @@ $options_to_delete = array(
 	'woi_print_margin_left',
 	'woi_print_gap',
 	'woi_print_page_size',
+	'woi_daily_cleanup_enabled',
+	'woi_delete_data_on_uninstall',
+	'woi_daily_orphan_cleanup_lock',
+	'woi_daily_orphan_cleanup_last_result',
+	'woi_legacy_order_image_meta_migrated_v1',
+	'woi_legacy_order_image_meta_migrating',
+	'woi_legacy_order_image_meta_migration_notice_v1',
+	'woi_legacy_order_image_meta_migrated_v2',
+	'woi_legacy_order_image_meta_migrating_v2',
+	'woi_legacy_order_image_meta_migration_notice_v2',
+	'woi_legacy_order_image_meta_migrated_v3',
+	'woi_legacy_order_image_meta_migrating_v3',
+	'woi_legacy_order_image_meta_migration_notice_v3',
 );
 
 foreach ( $options_to_delete as $option ) {
 	delete_option( $option );
 }
 
-// Delete uploaded WOI images (optional - only delete if you want to free up disk space).
-// Comment this block if you prefer to keep images after uninstall.
-$uploads_dir = wp_upload_dir();
-if ( ! empty( $uploads_dir['basedir'] ) ) {
-	$woi_dir = trailingslashit( $uploads_dir['basedir'] ) . 'woo-order-images/';
-	if ( is_dir( $woi_dir ) ) {
-		// Recursively delete all files in the woo-order-images directory.
-		_woi_delete_directory_recursive( $woi_dir );
+wp_clear_scheduled_hook( 'woi_daily_orphan_cleanup' );
+
+// Optional data deletion: only remove uploaded WOI images when user has explicitly opted in.
+if ( 'yes' === $delete_data_on_uninstall ) {
+	$uploads_dir = wp_upload_dir();
+	if ( ! empty( $uploads_dir['basedir'] ) ) {
+		$woi_dir = trailingslashit( $uploads_dir['basedir'] ) . 'woo-order-images/';
+		if ( is_dir( $woi_dir ) ) {
+			// Recursively delete all files in the woo-order-images directory.
+			_woi_delete_directory_recursive( $woi_dir );
+		}
 	}
 }
 

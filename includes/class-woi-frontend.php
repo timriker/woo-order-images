@@ -226,6 +226,16 @@ class WOI_Frontend {
 					<input type="range" class="woi-zoom-slider" data-woi-zoom-slider min="0" max="100" value="50" step="1" aria-label="<?php esc_attr_e( 'Zoom', 'woo-order-images' ); ?>">
 					<span class="woi-zoom-value" data-woi-zoom-value>100%</span>
 				</div>
+				<div class="woi-apply-count-row" data-woi-apply-count-row hidden>
+					<label class="woi-apply-count-label" for="woi-apply-count-<?php echo esc_attr( $product->get_id() ); ?>"><?php esc_html_e( 'Use this image for', 'woo-order-images' ); ?></label>
+					<select
+						id="woi-apply-count-<?php echo esc_attr( $product->get_id() ); ?>"
+						class="woi-apply-count-select"
+						data-woi-apply-count
+						aria-label="<?php esc_attr_e( 'Number of slots to fill with this image', 'woo-order-images' ); ?>"
+					></select>
+					<span class="woi-apply-count-suffix"><?php esc_html_e( 'slot(s)', 'woo-order-images' ); ?></span>
+				</div>
 				<div class="woi-modal-actions">
 					<button type="button" class="button" data-woi-swap-orientation><?php esc_html_e( 'Swap Orientation', 'woo-order-images' ); ?></button>
 					<button type="button" class="button" data-woi-rotate><?php esc_html_e( 'Rotate Image', 'woo-order-images' ); ?></button>

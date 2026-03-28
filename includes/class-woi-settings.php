@@ -5,6 +5,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 class WOI_Settings {
+	const ORPHAN_CLEANUP_MIN_AGE_SECONDS = DAY_IN_SECONDS;
+
+	const DAILY_CLEANUP_HOOK = 'woi_daily_orphan_cleanup';
+	const DAILY_CLEANUP_LOCK_OPTION = 'woi_daily_orphan_cleanup_lock';
+	const DAILY_CLEANUP_LAST_RESULT_OPTION = 'woi_daily_orphan_cleanup_last_result';
+	const OPTION_DAILY_CLEANUP_ENABLED = 'woi_daily_cleanup_enabled';
+	const OPTION_DELETE_DATA_ON_UNINSTALL = 'woi_delete_data_on_uninstall';
 	const OPTION_WATERMARK_TEXT = 'woi_watermark_text';
 	const DEFAULT_WATERMARK_TEXT = 'BestLifeMagnets.com';
 
@@ -35,9 +42,47 @@ class WOI_Settings {
 	);
 
 	public function init() {
+		add_action( 'init', array( $this, 'maybe_schedule_daily_cleanup' ) );
+		add_action( self::DAILY_CLEANUP_HOOK, array( $this, 'run_scheduled_orphan_cleanup' ) );
 		add_action( 'admin_menu', array( $this, 'register_settings_page' ) );
 		add_action( 'admin_init', array( $this, 'register_settings' ) );
 		add_action( 'admin_init', array( $this, 'handle_cleanup_request' ) );
+	}
+
+	public function maybe_schedule_daily_cleanup() {
+		$enabled = get_option( self::OPTION_DAILY_CLEANUP_ENABLED, 'yes' );
+		if ( 'yes' !== $enabled ) {
+			wp_clear_scheduled_hook( self::DAILY_CLEANUP_HOOK );
+			return;
+		}
+
+		if ( wp_next_scheduled( self::DAILY_CLEANUP_HOOK ) ) {
+			return;
+		}
+
+		wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', self::DAILY_CLEANUP_HOOK );
+	}
+
+	public function run_scheduled_orphan_cleanup() {
+		if ( '1' === get_option( self::DAILY_CLEANUP_LOCK_OPTION, '0' ) ) {
+			return;
+		}
+
+		update_option( self::DAILY_CLEANUP_LOCK_OPTION, '1', false );
+
+		try {
+			$deleted = $this->cleanup_orphaned_images();
+			update_option(
+				self::DAILY_CLEANUP_LAST_RESULT_OPTION,
+				array(
+					'timestamp' => time(),
+					'deleted'   => (int) $deleted,
+				),
+				false
+			);
+		} finally {
+			delete_option( self::DAILY_CLEANUP_LOCK_OPTION );
+		}
 	}
 
 	public function register_settings_page() {
@@ -124,6 +169,24 @@ class WOI_Settings {
 			)
 		);
 
+		register_setting(
+			'woi_settings_group',
+			self::OPTION_DELETE_DATA_ON_UNINSTALL,
+			array(
+				'sanitize_callback' => array( $this, 'sanitize_yes_no' ),
+				'default'           => 'no',
+			)
+		);
+
+		register_setting(
+			'woi_settings_group',
+			self::OPTION_DAILY_CLEANUP_ENABLED,
+			array(
+				'sanitize_callback' => array( $this, 'sanitize_yes_no' ),
+				'default'           => 'yes',
+			)
+		);
+
 		add_settings_section(
 			'woi_print_section',
 			__( 'Print Sheet', 'woo-order-images' ),
@@ -194,6 +257,22 @@ class WOI_Settings {
 			'woi-settings',
 			'woi_print_section'
 		);
+
+		add_settings_field(
+			self::OPTION_DELETE_DATA_ON_UNINSTALL,
+			__( 'Delete data on uninstall', 'woo-order-images' ),
+			array( $this, 'render_delete_data_on_uninstall_field' ),
+			'woi-settings',
+			'woi_print_section'
+		);
+
+		add_settings_field(
+			self::OPTION_DAILY_CLEANUP_ENABLED,
+			__( 'Daily orphan cleanup', 'woo-order-images' ),
+			array( $this, 'render_daily_cleanup_enabled_field' ),
+			'woi-settings',
+			'woi_print_section'
+		);
 	}
 
 	public function render_watermark_field() {
@@ -249,6 +328,31 @@ class WOI_Settings {
 		echo '<p class="description">' . esc_html__( 'Paper size for print sheet. Default: Letter (8.5" × 11").', 'woo-order-images' ) . '</p>';
 	}
 
+	public function render_delete_data_on_uninstall_field() {
+		$value = get_option( self::OPTION_DELETE_DATA_ON_UNINSTALL, 'no' );
+		echo '<label>';
+		echo '<input type="checkbox" name="' . esc_attr( self::OPTION_DELETE_DATA_ON_UNINSTALL ) . '" value="yes" ' . checked( 'yes', $value, false ) . ' /> ';
+		echo esc_html__( 'Yes — permanently delete Woo Order Images uploaded files when this plugin is uninstalled.', 'woo-order-images' );
+		echo '</label>';
+		echo '<p class="description">' . esc_html__( 'Recommended: leave unchecked to preserve historical order image files. Plugin settings are still removed on uninstall.', 'woo-order-images' ) . '</p>';
+	}
+
+	public function render_daily_cleanup_enabled_field() {
+		$value = get_option( self::OPTION_DAILY_CLEANUP_ENABLED, 'yes' );
+		$next_cleanup_ts = wp_next_scheduled( self::DAILY_CLEANUP_HOOK );
+		echo '<label>';
+		echo '<input type="checkbox" name="' . esc_attr( self::OPTION_DAILY_CLEANUP_ENABLED ) . '" value="yes" ' . checked( 'yes', $value, false ) . ' /> ';
+		echo esc_html__( 'Run orphan image cleanup automatically once per day.', 'woo-order-images' );
+		echo '</label>';
+		if ( 'yes' !== $value ) {
+			echo '<p class="description">' . esc_html__( 'Default: enabled. Currently disabled; manual cleanup only.', 'woo-order-images' ) . '</p>';
+		} elseif ( $next_cleanup_ts ) {
+			echo '<p class="description">' . esc_html( sprintf( __( 'Default: enabled. Next run: %s.', 'woo-order-images' ), wp_date( 'Y-m-d H:i:s', $next_cleanup_ts ) ) ) . '</p>';
+		} else {
+			echo '<p class="description">' . esc_html__( 'Default: enabled. Not currently scheduled yet.', 'woo-order-images' ) . '</p>';
+		}
+	}
+
 	public function render_settings_page() {
 		if ( ! current_user_can( 'manage_woocommerce' ) ) {
 			wp_die( esc_html__( 'You do not have permission to view this page.', 'woo-order-images' ) );
@@ -257,14 +361,23 @@ class WOI_Settings {
 		// Display cleanup result message if redirected from cleanup.
 		// phpcs:disable WordPress.Security.NonceVerification.Recommended
 		if ( isset( $_GET['woi_cleanup_result'] ) ) {
-			$deleted = absint( wp_unslash( $_GET['woi_cleanup_result'] ) );
+			$deleted      = absint( wp_unslash( $_GET['woi_cleanup_result'] ) );
+			$recent_skips = isset( $_GET['woi_cleanup_recent_skips'] ) ? absint( wp_unslash( $_GET['woi_cleanup_recent_skips'] ) ) : 0;
 			if ( $deleted > 0 ) {
 				echo '<div class="notice notice-success is-dismissible"><p>';
-				echo esc_html( sprintf( __( 'Cleanup complete: Deleted %d orphaned image file(s).', 'woo-order-images' ), $deleted ) );
+				if ( $recent_skips > 0 ) {
+					echo esc_html( sprintf( __( 'Cleanup complete: Deleted %1$d orphaned image file(s). %2$d recent orphaned file(s) were kept temporarily and will be eligible after 24 hours.', 'woo-order-images' ), $deleted, $recent_skips ) );
+				} else {
+					echo esc_html( sprintf( __( 'Cleanup complete: Deleted %d orphaned image file(s).', 'woo-order-images' ), $deleted ) );
+				}
 				echo '</p></div>';
 			} else {
 				echo '<div class="notice notice-info is-dismissible"><p>';
-				echo esc_html__( 'Cleanup complete: No orphaned files to delete.', 'woo-order-images' );
+				if ( $recent_skips > 0 ) {
+					echo esc_html( sprintf( __( 'Cleanup complete: No files deleted. %d orphaned file(s) are temporarily protected for 24 hours after upload.', 'woo-order-images' ), $recent_skips ) );
+				} else {
+					echo esc_html__( 'Cleanup complete: No orphaned files to delete.', 'woo-order-images' );
+				}
 				echo '</p></div>';
 			}
 		}
@@ -287,11 +400,32 @@ class WOI_Settings {
 				<div class="inside">
 					<p><?php esc_html_e( 'Cleanup orphaned image files that are no longer attached to any order.', 'woo-order-images' ); ?></p>
 					<?php
+					$next_cleanup_ts = wp_next_scheduled( self::DAILY_CLEANUP_HOOK );
+					$cleanup_enabled = get_option( self::OPTION_DAILY_CLEANUP_ENABLED, 'yes' );
+					$last_result     = get_option( self::DAILY_CLEANUP_LAST_RESULT_OPTION, array() );
+					$last_run_ts     = is_array( $last_result ) && isset( $last_result['timestamp'] ) ? absint( $last_result['timestamp'] ) : 0;
+					$last_deleted    = is_array( $last_result ) && isset( $last_result['deleted'] ) ? absint( $last_result['deleted'] ) : 0;
+
+					if ( 'yes' !== $cleanup_enabled ) {
+						echo '<p>' . esc_html__( 'Daily automatic cleanup: Disabled in settings.', 'woo-order-images' ) . '</p>';
+					} elseif ( ! $next_cleanup_ts ) {
+						echo '<p>' . esc_html__( 'Daily automatic cleanup: Not currently scheduled.', 'woo-order-images' ) . '</p>';
+					}
+
+					if ( $last_run_ts > 0 ) {
+						echo '<p>' . esc_html( sprintf( __( 'Last automatic cleanup: %1$s (deleted %2$d orphaned file(s)).', 'woo-order-images' ), wp_date( 'Y-m-d H:i:s', $last_run_ts ), $last_deleted ) ) . '</p>';
+					}
+
 					$image_counts = $this->get_image_cleanup_counts();
 					echo '<p>' . esc_html( sprintf( __( 'Images currently in use by orders: %d', 'woo-order-images' ), $image_counts['in_use_count'] ) ) . '</p>';
-					$orphaned_count = $image_counts['orphaned_count'];
+					echo '<p>' . esc_html( sprintf( __( 'Orphaned files eligible for deletion now: %d', 'woo-order-images' ), $image_counts['deletable_orphaned_count'] ) ) . '</p>';
+					if ( $image_counts['recent_orphaned_count'] > 0 ) {
+						echo '<p>' . esc_html( sprintf( __( 'Temporarily protected orphaned files (<24h old): %d', 'woo-order-images' ), $image_counts['recent_orphaned_count'] ) ) . '</p>';
+					}
+
+					$orphaned_count = $image_counts['deletable_orphaned_count'];
 					if ( $orphaned_count > 0 ) {
-						echo '<p><strong>' . esc_html( sprintf( __( 'Found %d orphaned file(s)', 'woo-order-images' ), $orphaned_count ) ) . '</strong></p>';
+						echo '<p><strong>' . esc_html( sprintf( __( 'Ready to delete: %d orphaned file(s)', 'woo-order-images' ), $orphaned_count ) ) . '</strong></p>';
 						?>
 						<form method="post" style="margin-top: 1em;">
 							<?php
@@ -305,6 +439,8 @@ class WOI_Settings {
 							?>
 						</form>
 						<?php
+					} elseif ( $image_counts['recent_orphaned_count'] > 0 ) {
+						echo '<p><em>' . esc_html__( 'No orphaned files are currently eligible for deletion. Recent orphaned files will become eligible after 24 hours.', 'woo-order-images' ) . '</em></p>';
 					} else {
 						echo '<p><em>' . esc_html__( 'No orphaned files found.', 'woo-order-images' ) . '</em></p>';
 					}
@@ -321,6 +457,10 @@ class WOI_Settings {
 
 	public function sanitize_page_size( $input ) {
 		return isset( self::$PAGE_SIZES[ $input ] ) ? $input : self::DEFAULT_PRINT_PAGE_SIZE;
+	}
+
+	public function sanitize_yes_no( $input ) {
+		return 'yes' === $input ? 'yes' : 'no';
 	}
 
 	public static function get_watermark_text() {
@@ -391,13 +531,16 @@ class WOI_Settings {
 		}
 		// phpcs:enable WordPress.Security.NonceVerification.Missing
 
-		$deleted = $this->cleanup_orphaned_images();
+		$cleanup_result = $this->cleanup_orphaned_images_with_stats();
+		$deleted        = isset( $cleanup_result['deleted'] ) ? absint( $cleanup_result['deleted'] ) : 0;
+		$recent_skips   = isset( $cleanup_result['recent_skipped'] ) ? absint( $cleanup_result['recent_skipped'] ) : 0;
 
 		// Redirect with result message.
 		$redirect_url = add_query_arg(
 			array(
-				'page'      => 'woi-settings',
-				'woi_cleanup_result' => $deleted,
+				'page'                     => 'woi-settings',
+				'woi_cleanup_result'       => $deleted,
+				'woi_cleanup_recent_skips' => $recent_skips,
 			),
 			admin_url( 'admin.php' )
 		);
@@ -414,13 +557,13 @@ class WOI_Settings {
 	public function count_orphaned_images() {
 		$image_counts = $this->get_image_cleanup_counts();
 
-		return $image_counts['orphaned_count'];
+		return $image_counts['deletable_orphaned_count'];
 	}
 
 	/**
 	 * Get referenced and orphaned image counts for the cleanup UI.
 	 *
-	 * @return array{in_use_count:int, orphaned_count:int}
+	 * @return array{in_use_count:int, orphaned_count:int, deletable_orphaned_count:int, recent_orphaned_count:int}
 	 */
 	private function get_image_cleanup_counts() {
 		$uploads_dir = wp_upload_dir();
@@ -431,23 +574,39 @@ class WOI_Settings {
 			return array(
 				'in_use_count'   => count( $db_paths ),
 				'orphaned_count' => 0,
+				'deletable_orphaned_count' => 0,
+				'recent_orphaned_count'    => 0,
 			);
 		}
 
 		$disk_files = $this->get_disk_image_paths( $woi_dir );
-		$orphaned   = 0;
+		$orphaned_total   = 0;
+		$orphaned_recent  = 0;
+		$orphaned_deletable = 0;
 
 		foreach ( array_keys( $disk_files ) as $disk_path ) {
-			$rel_path = $this->normalize_upload_relative_path( str_replace( $woi_dir, '', $disk_path ) );
+			$rel_path = $this->normalize_upload_relative_path( 'woo-order-images/' . ltrim( str_replace( $woi_dir, '', $disk_path ), '/' ) );
 
-			if ( '' === $rel_path || ! isset( $db_paths[ $rel_path ] ) ) {
-				$orphaned++;
+			if ( '' !== $rel_path && isset( $db_paths[ $rel_path ] ) ) {
+				continue;
 			}
+
+			$orphaned_total++;
+
+			$mtime = @filemtime( $disk_path );
+			if ( false === $mtime || ( time() - (int) $mtime ) < self::ORPHAN_CLEANUP_MIN_AGE_SECONDS ) {
+				$orphaned_recent++;
+				continue;
+			}
+
+			$orphaned_deletable++;
 		}
 
 		return array(
 			'in_use_count'   => count( $db_paths ),
-			'orphaned_count' => $orphaned,
+			'orphaned_count' => $orphaned_total,
+			'deletable_orphaned_count' => $orphaned_deletable,
+			'recent_orphaned_count'    => $orphaned_recent,
 		);
 	}
 
@@ -522,6 +681,17 @@ class WOI_Settings {
 	 * @return int Number of files deleted.
 	 */
 	public function cleanup_orphaned_images() {
+		$result = $this->cleanup_orphaned_images_with_stats();
+
+		return (int) $result['deleted'];
+	}
+
+	/**
+	 * Delete orphaned image files and return deletion statistics.
+	 *
+	 * @return array{deleted:int,recent_skipped:int}
+	 */
+	private function cleanup_orphaned_images_with_stats() {
 		$db_paths = $this->get_referenced_image_relative_paths();
 
 		// Get all files from disk.
@@ -529,15 +699,28 @@ class WOI_Settings {
 		$woi_dir     = trailingslashit( $uploads_dir['basedir'] ) . 'woo-order-images/';
 
 		if ( ! is_dir( $woi_dir ) ) {
-			return 0;
+			return array(
+				'deleted'        => 0,
+				'recent_skipped' => 0,
+			);
 		}
 
 		$disk_files = $this->get_disk_image_paths( $woi_dir );
 
 		// Delete orphaned files.
-		$deleted = 0;
+		$deleted       = 0;
+		$recent_skips  = 0;
 		foreach ( array_keys( $disk_files ) as $disk_path ) {
-			$rel_path = $this->normalize_upload_relative_path( str_replace( $woi_dir, '', $disk_path ) );
+			$mtime = @filemtime( $disk_path );
+			if ( false === $mtime || ( time() - (int) $mtime ) < self::ORPHAN_CLEANUP_MIN_AGE_SECONDS ) {
+				$rel_path = $this->normalize_upload_relative_path( 'woo-order-images/' . ltrim( str_replace( $woi_dir, '', $disk_path ), '/' ) );
+				if ( '' !== $rel_path && ! isset( $db_paths[ $rel_path ] ) ) {
+					$recent_skips++;
+				}
+				continue;
+			}
+
+			$rel_path = $this->normalize_upload_relative_path( 'woo-order-images/' . ltrim( str_replace( $woi_dir, '', $disk_path ), '/' ) );
 
 			if ( '' !== $rel_path && ! isset( $db_paths[ $rel_path ] ) && is_file( $disk_path ) ) {
 				if ( @unlink( $disk_path ) ) {
@@ -546,7 +729,10 @@ class WOI_Settings {
 			}
 		}
 
-		return $deleted;
+		return array(
+			'deleted'        => $deleted,
+			'recent_skipped' => $recent_skips,
+		);
 	}
 
 	/**

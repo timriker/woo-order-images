@@ -4,7 +4,7 @@ Tags: woocommerce, product images, image upload, printing, puzzle
 Requires at least: 6.8
 Tested up to: 6.9.4
 Requires PHP: 7.4
-Stable tag: 0.6.10
+Stable tag: 0.7.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -69,6 +69,17 @@ This plugin bundles the following third-party library:
   * https://github.com/YahnisElsts/plugin-update-checker
 
 == Changelog ==
+
+= 0.7.0 =
+* Removed SVG grid overlay from shared thumbnail renderer — grid is now baked once as raster in the JPEG thumbnail only, eliminating the double-grid rendering issue on cart and admin views.
+* Unified order history thumbnail rendering to use the same shared renderer as cart and admin (`render_thumbnail_html_static()`).
+* Fixed admin order image frames for puzzle products — frame aspect ratio now reflects the full puzzle grid dimensions (cols × tile width : rows × tile height) rather than the single-tile aspect ratio, preventing square frames and row clipping on portrait puzzles.
+* Fixed AJAX crop-save response to return the correct puzzle-aware aspect ratio for live admin frame updates.
+* Non-puzzle items now always store `puzzle_cols=0` and `puzzle_rows=0`, preventing grid overlays from appearing on non-puzzle magnets.
+* Added `get_thumbnail_frame_aspect_ratio()` helper for consistent puzzle-vs-non-puzzle frame sizing.
+* Added daily scheduled orphan-image cleanup with 24-hour protection for recently uploaded files.
+* Added multi-slot image assignment in the frontend crop modal with per-slot apply count display.
+* Added orientation and rotation persistence across cart sessions.
 
 = 0.6.10 =
 * Fixed GitHub repository link in plugin details from `bestlifemagnets/woo-order-images` to `timriker/woo-order-images`.

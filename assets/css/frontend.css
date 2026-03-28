@@ -86,6 +86,27 @@
 	flex-wrap: wrap;
 }
 
+.woi-inline-thumbnails {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-top: 8px;
+	align-items: flex-start;
+}
+
+.woi-inline-thumb-link {
+	display: inline-block;
+	line-height: 0;
+	flex: 0 0 auto;
+}
+
+.woi-inline-thumb-image {
+	display: block;
+	border: 1px solid #ccd0d4;
+	border-radius: 4px;
+	background: #f6f7f7;
+}
+
 .woi-modal[hidden] {
 	display: none;
 }
@@ -252,6 +273,25 @@
 	font-size: 12px;
 	color: #50575e;
 	font-variant-numeric: tabular-nums;
+}
+
+.woi-apply-count-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 8px 0 2px;
+	padding: 0 2px;
+}
+
+.woi-apply-count-label,
+.woi-apply-count-suffix {
+	font-size: 13px;
+	font-weight: 600;
+	color: #50575e;
+}
+
+.woi-apply-count-select {
+	min-width: 68px;
 }
 
 .woi-modal-actions {

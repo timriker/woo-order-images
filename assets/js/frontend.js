@@ -31,6 +31,8 @@
 		const modalImage = modal ? modal.querySelector('[data-woi-cropper-image]') : null;
 		const zoomSlider = modal ? modal.querySelector('[data-woi-zoom-slider]') : null;
 		const zoomValue = modal ? modal.querySelector('[data-woi-zoom-value]') : null;
+		const applyCountRow = modal ? modal.querySelector('[data-woi-apply-count-row]') : null;
+		const applyCountSelect = modal ? modal.querySelector('[data-woi-apply-count]') : null;
 		const saveCropButton = modal ? modal.querySelector('[data-woi-save-crop]') : null;
 		const closeButtons = modal ? modal.querySelectorAll('[data-woi-close]') : [];
 		const puzzleGrid = modal ? modal.querySelector('[data-woi-puzzle-grid]') : null;
@@ -67,6 +69,7 @@
 			cropGeometry: null,
 			cropMinZoom: null,
 			cropMaxZoom: null,
+			assignableIndexes: [],
 		};
 
 		const getPuzzleGridForOrientation = (orientation) => {
@@ -252,8 +255,58 @@
 		 */
 		const cleanupSlotUrl = (slot) => {
 			if (slot && slot.fileUrl && slot.fileUrl.startsWith('blob:')) {
-				URL.revokeObjectURL(slot.fileUrl);
+				const sharedByOtherSlot = state.slots.some((candidate) => candidate !== slot && candidate.fileUrl === slot.fileUrl);
+				if (!sharedByOtherSlot) {
+					URL.revokeObjectURL(slot.fileUrl);
+				}
 			}
+		};
+
+		const getAssignableIndexes = (activeIndex) => {
+			if (activeIndex < 0 || !state.slots[activeIndex]) {
+				return [];
+			}
+
+			const indexes = [activeIndex];
+			const activeSlot = state.slots[activeIndex];
+			const activeIsOpen = !activeSlot.crop || !activeSlot.sourceUrl;
+
+			if (!activeIsOpen) {
+				return indexes;
+			}
+
+			state.slots.forEach((slot, index) => {
+				if (index === activeIndex) {
+					return;
+				}
+
+				if (!slot.crop || !slot.sourceUrl) {
+					indexes.push(index);
+				}
+			});
+
+			return indexes;
+		};
+
+		const syncApplyCountControl = (activeIndex) => {
+			state.assignableIndexes = getAssignableIndexes(activeIndex);
+
+			if (!applyCountRow || !applyCountSelect) {
+				return;
+			}
+
+			const maxAssignable = state.assignableIndexes.length;
+			applyCountSelect.innerHTML = '';
+
+			for (let count = 1; count <= maxAssignable; count += 1) {
+				const option = document.createElement('option');
+				option.value = String(count);
+				option.textContent = String(count);
+				applyCountSelect.appendChild(option);
+			}
+
+			applyCountSelect.value = '1';
+			applyCountRow.hidden = maxAssignable <= 1;
 		};
 
 		const assignFileToSlot = async (slot, file) => {
@@ -374,6 +427,7 @@
 
 			const geometry = getGeometry(slot.orientation || defaultOrientation, slot);
 			state.activeIndex = index;
+			syncApplyCountControl(index);
 			modal.hidden = false;
 			modalImage.src = slot.fileUrl;
 			applyModalGuides(geometry);
@@ -492,6 +546,13 @@
 			modal.hidden = true;
 			modalImage.removeAttribute('src');
 			state.activeIndex = -1;
+			state.assignableIndexes = [];
+			if (applyCountRow) {
+				applyCountRow.hidden = true;
+			}
+			if (applyCountSelect) {
+				applyCountSelect.innerHTML = '';
+			}
 			if (puzzleGrid) {
 				puzzleGrid.hidden = true;
 				puzzleGrid.style.left = '';
@@ -522,6 +583,8 @@
 						? {
 							source: slot.sourceUrl,
 							crop: slot.crop,
+							orientation: slot.orientation || defaultOrientation,
+							rotation: slot.rotation || 0,
 							...(isPuzzle ? {
 								puzzle_cols: Math.max(1, parseInt(slot.puzzleCols || puzzleCols, 10)),
 								puzzle_rows: Math.max(1, parseInt(slot.puzzleRows || puzzleRows, 10)),
@@ -671,6 +734,16 @@
 				return;
 			}
 
+			let assignCount = 1;
+			if (applyCountSelect && state.assignableIndexes.length > 1) {
+				assignCount = Math.max(1, parseInt(applyCountSelect.value || '1', 10));
+			}
+
+			const targetIndexes = state.assignableIndexes.slice(0, Math.min(assignCount, state.assignableIndexes.length));
+			if (!targetIndexes.length) {
+				targetIndexes.push(state.activeIndex);
+			}
+
 			slot.crop = {
 				x: visibleData.x,
 				y: visibleData.y,
@@ -683,6 +756,32 @@
 				slot.previewData = previewCanvas ? previewCanvas.toDataURL('image/jpeg', 0.85) : '';
 			} catch (error) {
 				slot.previewData = '';
+			}
+
+			for (let targetOffset = 1; targetOffset < targetIndexes.length; targetOffset += 1) {
+				const targetIndex = targetIndexes[targetOffset];
+				const targetSlot = state.slots[targetIndex];
+				if (!targetSlot) {
+					continue;
+				}
+
+				cleanupSlotUrl(targetSlot);
+				targetSlot.fileUrl = slot.fileUrl;
+				targetSlot.sourceData = '';
+				targetSlot.sourceUrl = slot.sourceUrl;
+				targetSlot.previewData = slot.previewData;
+				targetSlot.crop = {
+					x: slot.crop.x,
+					y: slot.crop.y,
+					width: slot.crop.width,
+					height: slot.crop.height,
+				};
+				targetSlot.orientation = slot.orientation;
+				targetSlot.rotation = slot.rotation;
+				if (isPuzzle) {
+					targetSlot.puzzleCols = slot.puzzleCols;
+					targetSlot.puzzleRows = slot.puzzleRows;
+				}
 			}
 
 			renderSlots();
@@ -776,21 +875,31 @@
 				state.slots[index].crop = entry && typeof entry === 'object' && entry.crop && typeof entry.crop === 'object'
 					? entry.crop
 					: null;
-				state.slots[index].orientation = isSquare ? 'square' : await detectImageOrientation(imageUrl);
+
+				// Restore saved orientation if available, otherwise detect
+				const savedOrientation = entry && typeof entry === 'object' && typeof entry.orientation === 'string'
+					? entry.orientation
+					: null;
+				state.slots[index].orientation = savedOrientation || (isSquare ? 'square' : await detectImageOrientation(imageUrl));
+
+				// Restore saved rotation if available
+				const savedRotation = entry && typeof entry === 'object' && typeof entry.rotation === 'number'
+					? entry.rotation
+					: 0;
+				state.slots[index].rotation = savedRotation;
+
 				if (isPuzzle) {
 					const entryCols = entry && typeof entry === 'object' ? parseInt(entry.puzzle_cols || '0', 10) : 0;
 					const entryRows = entry && typeof entry === 'object' ? parseInt(entry.puzzle_rows || '0', 10) : 0;
 					if (entryCols > 0 && entryRows > 0) {
 						state.slots[index].puzzleCols = entryCols;
 						state.slots[index].puzzleRows = entryRows;
-						state.slots[index].orientation = entryCols >= entryRows ? 'landscape' : 'portrait';
 					} else {
 						const grid = getPuzzleGridForOrientation(state.slots[index].orientation);
 						state.slots[index].puzzleCols = grid.cols;
 						state.slots[index].puzzleRows = grid.rows;
 					}
 				}
-				state.slots[index].rotation = 0;
 			}
 
 			renderSlots();

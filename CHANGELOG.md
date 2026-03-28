@@ -4,6 +4,23 @@ All notable changes to `woo-order-images` will be documented in this file.
 
 This project follows a pragmatic release history rather than a strict changelog format for older versions. Recent releases are documented in more detail.
 
+## [0.7.0] - 2026-03-27
+
+### Fixed
+- Removed SVG grid overlay from shared thumbnail renderer — grid is now baked once as raster in the JPEG thumbnail only, eliminating the double-grid rendering issue on cart and admin views.
+- Fixed admin order image frames for puzzle products: frame aspect ratio now reflects the full puzzle grid dimensions (`cols × tile width : rows × tile height`) rather than the single-tile aspect ratio, preventing square frames and row clipping on portrait puzzles.
+- Fixed AJAX crop-save response to return the correct puzzle-aware aspect ratio so admin frames update correctly after live re-crop.
+- Non-puzzle items now always store `puzzle_cols=0` and `puzzle_rows=0`, preventing grid overlays from appearing on non-puzzle magnets.
+
+### Changed
+- Unified order history thumbnail rendering to use the same shared renderer as cart and admin (`render_thumbnail_html_static()`), so all views are consistent.
+
+### Added
+- `get_thumbnail_frame_aspect_ratio()` helper for consistent puzzle-vs-non-puzzle frame aspect ratio calculation.
+- Daily scheduled orphan-image cleanup with 24-hour protection for recently uploaded files.
+- Multi-slot image assignment in the frontend crop modal with per-slot apply count display.
+- Orientation and rotation persistence across cart sessions.
+
 ## [0.6.10] - 2026-03-25
 
 ### Fixed

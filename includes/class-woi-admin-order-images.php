@@ -131,15 +131,16 @@ class WOI_Admin_Order_Images {
 			);
 			$grid        = $this->resolve_puzzle_grid_for_entry( $base_spec, $url, $crop, $image_entry );
 			$spec        = ! empty( $base_spec['is_puzzle'] ) ? $base_spec : $this->get_oriented_spec_for_crop( $base_spec, $url, $crop );
-			$thumb_src   = $this->build_thumbnail_data_url( $url, $crop, 240 );
-			if ( '' === $thumb_src ) {
-				$thumb_src = $url;
-			}
+			$frame_ratio = $this->get_thumbnail_frame_aspect_ratio( $spec, $grid, ! empty( $base_spec['is_puzzle'] ) );
 			$index_label = sprintf( __( 'Image %d', 'woo-order-images' ), ( $index + 1 ) );
+
+			// Use unified helper method to render thumbnail with grid
+			$thumbnail_html = WOI_Order_Images::render_thumbnail_html_static( $url, $crop, (int) $grid['cols'], (int) $grid['rows'], $spec['visible_width'], $spec['visible_height'], 72, 'woi-admin' );
+
 			echo '<span class="woi-admin-image-thumb">';
 			echo '<a href="' . esc_url( $url ) . '" target="_blank" rel="noopener noreferrer" title="' . esc_attr( $index_label ) . '">';
-			echo '<span class="woi-admin-image-frame" data-woi-admin-thumb-frame style="display:block;width:72px;aspect-ratio:' . esc_attr( $spec['visible_aspect_ratio'] ) . ';overflow:hidden;border:1px solid #ccd0d4;border-radius:4px;background:#f6f7f7;">';
-			echo '<img src="' . esc_attr( $thumb_src ) . '" alt="' . esc_attr( $index_label ) . '" data-woi-admin-thumb-image style="width:100%;height:100%;object-fit:cover;display:block;" />';
+			echo '<span class="woi-admin-image-frame" data-woi-admin-thumb-frame style="display:block;aspect-ratio:' . esc_attr( $frame_ratio ) . ';overflow:hidden;border:1px solid #ccd0d4;border-radius:4px;background:#f6f7f7;position:relative;">';
+			echo $thumbnail_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
 			echo '</span>';
 			echo '</a>';
 			echo '<button type="button" class="button-link woi-admin-image-edit" data-woi-admin-edit-crop'
@@ -256,8 +257,9 @@ class WOI_Admin_Order_Images {
 		$entry      = $images[ $image_index ];
 		$url        = (string) $entry['url'];
 		$grid       = $this->resolve_puzzle_grid_for_entry( $base_spec, $url, $crop, $entry );
-		$thumb_src  = $this->build_thumbnail_data_url( $url, $crop, 240 );
+		$thumb_src  = WOI_Order_Images::build_thumbnail_image_url( $url, $crop, 240, (int) $grid['cols'], (int) $grid['rows'] );
 		$thumb_spec = ! empty( $base_spec['is_puzzle'] ) ? $base_spec : $this->get_oriented_spec_for_crop( $base_spec, $url, $crop );
+		$frame_ratio = $this->get_thumbnail_frame_aspect_ratio( $thumb_spec, $grid, ! empty( $base_spec['is_puzzle'] ) );
 
 		if ( '' === $thumb_src ) {
 			$thumb_src = $url;
@@ -267,12 +269,33 @@ class WOI_Admin_Order_Images {
 			array(
 				'crop'                 => $crop,
 				'thumbSrc'             => $thumb_src,
-				'visibleAspectRatio'   => $thumb_spec['visible_aspect_ratio'],
+				'visibleAspectRatio'   => $frame_ratio,
 				'puzzleCols'           => (int) $grid['cols'],
 				'puzzleRows'           => (int) $grid['rows'],
 				'currentOrientation'   => $this->get_entry_orientation( $base_spec, $crop, $grid ),
 			)
 		);
+	}
+
+	private function get_thumbnail_frame_aspect_ratio( $spec, $grid, $is_puzzle ) {
+		if ( ! $is_puzzle ) {
+			return max( 0.0001, (float) $spec['visible_aspect_ratio'] );
+		}
+
+		$cols = isset( $grid['cols'] ) ? max( 1, (int) $grid['cols'] ) : 1;
+		$rows = isset( $grid['rows'] ) ? max( 1, (int) $grid['rows'] ) : 1;
+
+		$visible_width  = isset( $spec['visible_width'] ) ? max( 0.0001, (float) $spec['visible_width'] ) : 1.0;
+		$visible_height = isset( $spec['visible_height'] ) ? max( 0.0001, (float) $spec['visible_height'] ) : 1.0;
+
+		$overall_width  = $visible_width * $cols;
+		$overall_height = $visible_height * $rows;
+
+		if ( $overall_width <= 0 || $overall_height <= 0 ) {
+			return max( 0.0001, (float) $spec['visible_aspect_ratio'] );
+		}
+
+		return max( 0.0001, $overall_width / $overall_height );
 	}
 
 	public function render_frontend_order_item_images( $item_id, $item, $order, $plain_text ) {
@@ -294,15 +317,13 @@ class WOI_Admin_Order_Images {
 			if ( '' === $url ) {
 				continue;
 			}
-			$spec        = $this->get_oriented_spec_for_crop( $base_spec, $url, $crop );
-			$thumb_src   = $this->build_thumbnail_data_url( $url, $crop, 220 );
-			if ( '' === $thumb_src ) {
-				$thumb_src = $url;
-			}
+			$grid        = $this->resolve_puzzle_grid_for_entry( $base_spec, $url, $crop, $entry );
+			$spec        = ! empty( $base_spec['is_puzzle'] ) ? $base_spec : $this->get_oriented_spec_for_crop( $base_spec, $url, $crop );
+			$thumbnail_html = WOI_Order_Images::render_thumbnail_html_static( $url, $crop, (int) $grid['cols'], (int) $grid['rows'], $spec['visible_width'], $spec['visible_height'], 68, 'woi-history' );
 			$index_label = sprintf( __( 'Image %d', 'woo-order-images' ), ( $index + 1 ) );
 			echo '<a href="' . esc_url( $url ) . '" target="_blank" rel="noopener noreferrer" title="' . esc_attr( $index_label ) . '">';
-			echo '<span style="display:block;width:68px;aspect-ratio:' . esc_attr( $spec['visible_aspect_ratio'] ) . ';overflow:hidden;border:1px solid #ccd0d4;border-radius:4px;background:#f6f7f7;">';
-			echo '<img src="' . esc_attr( $thumb_src ) . '" alt="' . esc_attr( $index_label ) . '" style="display:block;width:100%;height:100%;object-fit:cover;" />';
+			echo '<span style="display:block;line-height:0;position:relative;overflow:hidden;border:1px solid #ccd0d4;border-radius:4px;background:#f6f7f7;">';
+			echo $thumbnail_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
 			echo '</span>';
 			echo '</a>';
 		}
@@ -702,95 +723,14 @@ class WOI_Admin_Order_Images {
 
 					return $swapped;
 				}
+
+				return $spec;
 			}
 		}
 
 		return $this->get_oriented_spec( $spec, $url );
 	}
 
-	private function build_thumbnail_data_url( $source_url, $crop, $max_side = 220 ) {
-		if ( ! is_array( $crop ) || empty( $crop['width'] ) || empty( $crop['height'] ) ) {
-			return '';
-		}
-
-		$path = $this->url_to_upload_path( $source_url );
-		if ( ! $path || ! is_file( $path ) ) {
-			return '';
-		}
-
-		if ( ! function_exists( 'imagecreatefromstring' ) || ! function_exists( 'imagecreatetruecolor' ) ) {
-			return '';
-		}
-
-		$raw = @file_get_contents( $path );
-		if ( false === $raw || '' === $raw ) {
-			return '';
-		}
-
-		$source = @imagecreatefromstring( $raw );
-		if ( ! $source ) {
-			return '';
-		}
-
-		$src_w = imagesx( $source );
-		$src_h = imagesy( $source );
-		if ( $src_w <= 0 || $src_h <= 0 ) {
-			imagedestroy( $source );
-			return '';
-		}
-
-		$rect = $this->normalize_crop_rect( $crop, $src_w, $src_h );
-		if ( $rect['w'] <= 0 || $rect['h'] <= 0 ) {
-			imagedestroy( $source );
-			return '';
-		}
-
-		$max_side = max( 1, (int) $max_side );
-		$scale    = min( 1, $max_side / max( $rect['w'], $rect['h'] ) );
-		$thumb_w  = max( 1, (int) round( $rect['w'] * $scale ) );
-		$thumb_h  = max( 1, (int) round( $rect['h'] * $scale ) );
-
-		$thumb = imagecreatetruecolor( $thumb_w, $thumb_h );
-		if ( ! $thumb ) {
-			imagedestroy( $source );
-			return '';
-		}
-
-		imagecopyresampled(
-			$thumb,
-			$source,
-			0,
-			0,
-			$rect['x'],
-			$rect['y'],
-			$thumb_w,
-			$thumb_h,
-			$rect['w'],
-			$rect['h']
-		);
-
-		ob_start();
-		imagejpeg( $thumb, null, 88 );
-		$jpeg = ob_get_clean();
-
-		imagedestroy( $thumb );
-		imagedestroy( $source );
-
-		if ( empty( $jpeg ) ) {
-			return '';
-		}
-
-		return 'data:image/jpeg;base64,' . base64_encode( $jpeg );
-	}
-
-	private function build_single_tile_data_url( $source_url, $crop, $spec ) {
-		$jpeg = $this->build_single_tile_jpeg( $source_url, $crop, $spec );
-		if ( empty( $jpeg ) ) {
-			return '';
-		}
-
-		return 'data:image/jpeg;base64,' . base64_encode( $jpeg );
-	}
 
 	private function build_single_tile_jpeg( $source_url, $crop, $spec ) {
 		$path = $this->url_to_upload_path( $source_url );
@@ -961,8 +901,8 @@ class WOI_Admin_Order_Images {
 		$visible_height = (float) $item->get_meta( WOI_Order_Images::ORDER_META_VISIBLE_HEIGHT, true );
 		$wrap_margin    = WOI_Settings::get_print_bleed();
 		$is_puzzle      = 'yes' === $item->get_meta( WOI_Order_Images::ORDER_META_IS_PUZZLE, true );
-		$puzzle_cols    = max( 1, (int) $item->get_meta( WOI_Order_Images::ORDER_META_PUZZLE_COLS, true ) );
-		$puzzle_rows    = max( 1, (int) $item->get_meta( WOI_Order_Images::ORDER_META_PUZZLE_ROWS, true ) );
+		$puzzle_cols    = $is_puzzle ? max( 1, (int) $item->get_meta( WOI_Order_Images::ORDER_META_PUZZLE_COLS, true ) ) : 0;
+		$puzzle_rows    = $is_puzzle ? max( 1, (int) $item->get_meta( WOI_Order_Images::ORDER_META_PUZZLE_ROWS, true ) ) : 0;
 
 		if ( $visible_width <= 0 ) {
 			$visible_width = 2.0;
@@ -991,6 +931,13 @@ class WOI_Admin_Order_Images {
 	}
 
 	private function resolve_puzzle_grid_for_entry( $spec, $url, $crop, $entry ) {
+		if ( empty( $spec['is_puzzle'] ) ) {
+			return array(
+				'cols' => 0,
+				'rows' => 0,
+			);
+		}
+
 		$default_cols = max( 1, (int) $spec['puzzle_cols'] );
 		$default_rows = max( 1, (int) $spec['puzzle_rows'] );
 		$entry_cols   = isset( $entry['puzzle_cols'] ) ? max( 0, (int) $entry['puzzle_cols'] ) : 0;
@@ -1168,15 +1115,6 @@ class WOI_Admin_Order_Images {
 			'w' => max( 1, (int) round( $adjusted['w'] ) ),
 			'h' => max( 1, (int) round( $adjusted['h'] ) ),
 		);
-	}
-
-	private function build_puzzle_tile_data_url( $source_url, $crop, $spec, $col, $row, $cols, $rows ) {
-		$jpeg = $this->build_puzzle_tile_jpeg( $source_url, $crop, $spec, $col, $row, $cols, $rows );
-		if ( empty( $jpeg ) ) {
-			return '';
-		}
-
-		return 'data:image/jpeg;base64,' . base64_encode( $jpeg );
 	}
 
 	private function build_puzzle_tile_jpeg( $source_url, $crop, $spec, $col, $row, $cols, $rows ) {
