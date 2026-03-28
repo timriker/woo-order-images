@@ -11,6 +11,9 @@ class WOI_Admin_Order_Images {
 		add_action( 'admin_post_woi_print_sheet', array( $this, 'render_print_page' ) );
 		add_action( 'admin_post_woi_print_image', array( $this, 'render_print_image' ) );
 		add_action( 'woocommerce_order_actions_end', array( $this, 'render_order_level_print_button' ), 10, 1 );
+		add_filter( 'woocommerce_admin_order_actions', array( $this, 'add_admin_order_actions_print_action' ), 10, 2 );
+		add_filter( 'woocommerce_shop_order_list_table_order_actions', array( $this, 'add_order_list_print_action' ), 10, 2 );
+		add_filter( 'post_row_actions', array( $this, 'add_legacy_order_row_print_action' ), 10, 2 );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_admin_assets' ) );
 		add_action( 'admin_footer', array( $this, 'render_admin_crop_modal' ) );
 		add_action( 'wp_ajax_woi_admin_update_order_crop', array( $this, 'ajax_update_order_crop' ) );
@@ -76,29 +79,82 @@ class WOI_Admin_Order_Images {
 			return;
 		}
 
-		$has_images = false;
-		foreach ( $order->get_items() as $item ) {
-			if ( $item instanceof WC_Order_Item_Product ) {
-				$images = $this->get_order_item_images( $item );
-				if ( ! empty( $images ) ) {
-					$has_images = true;
-					break;
-				}
-			}
-		}
-
-		if ( ! $has_images ) {
+		if ( ! $this->order_has_woi_images( $order ) ) {
 			return;
 		}
 
-		$print_sheet_url = add_query_arg(
-			array(
-				'action'   => 'woi_print_sheet',
-				'order_id' => $order->get_id(),
-			),
-			admin_url( 'admin-post.php' )
-		);
+		$print_sheet_url = $this->get_print_sheet_url( $order->get_id() );
 		echo '<li style="margin:6px 0 0;padding:0;list-style:none;"><a class="button button-secondary" href="' . esc_url( $print_sheet_url ) . '" target="_blank" rel="noopener noreferrer" style="width:100%;text-align:center;display:block;">' . esc_html__( 'Open Print Sheet', 'woo-order-images' ) . '</a></li>';
+	}
+
+	public function add_order_list_print_action( $actions, $order ) {
+		if ( ! $order instanceof WC_Order ) {
+			return $actions;
+		}
+
+		$print_action = $this->get_order_list_print_action( $order );
+		if ( empty( $print_action ) ) {
+			return $actions;
+		}
+
+		$actions['woi_print_sheet'] = $print_action;
+
+		return $actions;
+	}
+
+	public function add_admin_order_actions_print_action( $actions, $order ) {
+		if ( ! $order instanceof WC_Order ) {
+			return $actions;
+		}
+
+		$print_action = $this->get_order_list_print_action( $order );
+		if ( empty( $print_action ) ) {
+			return $actions;
+		}
+
+		$actions['woi_print_sheet'] = $print_action;
+
+		return $actions;
+	}
+
+	private function get_order_list_print_action( $order ) {
+		if ( ! current_user_can( 'manage_woocommerce' ) ) {
+			return array();
+		}
+
+		if ( ! $this->order_has_woi_images( $order ) ) {
+			return array();
+		}
+
+		return array(
+			'url'    => $this->get_print_sheet_url( $order->get_id() ),
+			'name'   => __( 'Print Sheet', 'woo-order-images' ),
+			'action' => 'view',
+		);
+	}
+
+	public function add_legacy_order_row_print_action( $actions, $post ) {
+		if ( ! is_admin() || ! current_user_can( 'manage_woocommerce' ) ) {
+			return $actions;
+		}
+
+		if ( ! $post instanceof WP_Post || 'shop_order' !== $post->post_type ) {
+			return $actions;
+		}
+
+		if ( $this->is_hpos_enabled() ) {
+			// HPOS list table uses its own actions hook above.
+			return $actions;
+		}
+
+		$order = wc_get_order( (int) $post->ID );
+		if ( ! $order || ! $this->order_has_woi_images( $order ) ) {
+			return $actions;
+		}
+
+		$actions['woi_print_sheet'] = '<a href="' . esc_url( $this->get_print_sheet_url( $order->get_id() ) ) . '" target="_blank" rel="noopener noreferrer">' . esc_html__( 'Print Sheet', 'woo-order-images' ) . '</a>';
+
+		return $actions;
 	}
 
 	public function render_order_item_images( $item_id, $item, $product ) {
@@ -673,6 +729,33 @@ class WOI_Admin_Order_Images {
 		return array();
 	}
 
+	private function order_has_woi_images( $order ) {
+		if ( ! $order instanceof WC_Abstract_Order ) {
+			return false;
+		}
+
+		foreach ( $order->get_items() as $item ) {
+			if ( $item instanceof WC_Order_Item_Product ) {
+				$images = $this->get_order_item_images( $item );
+				if ( ! empty( $images ) ) {
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	private function get_print_sheet_url( $order_id ) {
+		return add_query_arg(
+			array(
+				'action'   => 'woi_print_sheet',
+				'order_id' => absint( $order_id ),
+			),
+			admin_url( 'admin-post.php' )
+		);
+	}
+
 	private function get_oriented_spec( $spec, $url ) {
 		$ratio = $this->get_image_ratio_from_url( $url );
 
@@ -1079,6 +1162,23 @@ class WOI_Admin_Order_Images {
 		}
 
 		return false !== strpos( $screen_id, 'wc-orders' );
+	}
+
+	private function is_hpos_enabled() {
+		if ( ! function_exists( 'wc_get_container' ) ) {
+			return false;
+		}
+
+		if ( ! class_exists( '\\Automattic\\WooCommerce\\Internal\\DataStores\\Orders\\CustomOrdersTableController' ) ) {
+			return false;
+		}
+
+		$controller = wc_get_container()->get( '\\Automattic\\WooCommerce\\Internal\\DataStores\\Orders\\CustomOrdersTableController' );
+		if ( ! $controller || ! method_exists( $controller, 'custom_orders_table_usage_is_enabled' ) ) {
+			return false;
+		}
+
+		return (bool) $controller->custom_orders_table_usage_is_enabled();
 	}
 
 	private function fit_crop_rect_to_aspect_ratio( $rect, $target_aspect, $src_w, $src_h ) {

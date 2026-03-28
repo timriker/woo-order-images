@@ -4,6 +4,15 @@ All notable changes to `woo-order-images` will be documented in this file.
 
 This project follows a pragmatic release history rather than a strict changelog format for older versions. Recent releases are documented in more detail.
 
+## [0.7.1] - 2026-03-27
+
+### Added
+- Added a `Print Sheet` action in the WooCommerce admin Orders list `Actions` column for orders with WOI images.
+- Added compatibility coverage across both WooCommerce order-action filter paths and a legacy `post_row_actions` fallback for non-HPOS order tables.
+
+### Changed
+- Styled the product-page `Choose Files` control so it consistently appears as a button across themes.
+
 ## [0.7.0] - 2026-03-27
 
 ### Fixed

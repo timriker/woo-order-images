@@ -4,7 +4,7 @@ Tags: woocommerce, product images, image upload, printing, puzzle
 Requires at least: 6.8
 Tested up to: 6.9.4
 Requires PHP: 7.4
-Stable tag: 0.7.0
+Stable tag: 0.7.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -69,6 +69,11 @@ This plugin bundles the following third-party library:
   * https://github.com/YahnisElsts/plugin-update-checker
 
 == Changelog ==
+
+= 0.7.1 =
+* Added a `Print Sheet` action in the WooCommerce admin Orders list `Actions` column for orders with WOI images, with compatibility across both order-action hook paths.
+* Added legacy `post_row_actions` fallback support for non-HPOS order tables.
+* Styled the product-page `Choose Files` control to render as a visible button across themes.
 
 = 0.7.0 =
 * Removed SVG grid overlay from shared thumbnail renderer — grid is now baked once as raster in the JPEG thumbnail only, eliminating the double-grid rendering issue on cart and admin views.
