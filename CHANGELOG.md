@@ -4,6 +4,15 @@ All notable changes to `woo-order-images` will be documented in this file.
 
 This project follows a pragmatic release history rather than a strict changelog format for older versions. Recent releases are documented in more detail.
 
+## [0.7.2] - 2026-03-28
+
+### Changed
+- Redesigned admin order image interaction: replaced hover-reveal edit button with click-activated popup menu offering "View Image" and "Adjust Crop" options.
+- Improved touch device UX: all image actions now accessible via click, eliminating iPad hover state issues.
+
+### Fixed
+- Fixed event delegation for menu triggers to use delegated click handler on document, ensuring all thumbnail buttons respond to clicks (fixes issue where only the first image in a product would show the menu).
+
 ## [0.7.1] - 2026-03-27
 
 ### Added

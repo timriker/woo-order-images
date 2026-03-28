@@ -4,36 +4,59 @@
 	line-height: 0;
 }
 
-.woi-admin-image-edit {
-	position: absolute;
-	right: 4px;
-	top: 4px;
-	width: 24px;
-	height: 24px;
-	border-radius: 999px;
-	background: rgba(17, 17, 17, 0.82);
-	color: #fff;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	opacity: 0;
-	transform: translateY(-2px);
-	transition: opacity 0.14s ease, transform 0.14s ease;
-	text-decoration: none;
-	z-index: 2;
+.woi-admin-image-menu-trigger {
+	position: relative;
+	padding: 0;
+	border: none;
+	background: none;
+	cursor: pointer;
+	display: block;
 }
 
-.woi-admin-image-thumb:hover .woi-admin-image-edit,
-.woi-admin-image-thumb:focus-within .woi-admin-image-edit {
-	opacity: 1;
-	transform: translateY(0);
+.woi-admin-image-menu-trigger:focus {
+	outline: 2px solid #2271b1;
+	outline-offset: 2px;
+	border-radius: 4px;
 }
 
-.woi-admin-image-edit:focus,
-.woi-admin-image-edit:hover {
-	color: #fff;
-	background: rgba(17, 17, 17, 0.92);
-	box-shadow: 0 0 0 2px rgba(34, 113, 177, 0.32);
+/* Menu popup that appears when thumbnail is clicked */
+.woi-admin-image-menu {
+	position: fixed;
+	background: #fff;
+	border: 1px solid #c3c4c7;
+	border-radius: 6px;
+	box-shadow: 0 3px 6px rgba(0, 0, 0, 0.15);
+	min-width: 160px;
+	z-index: 99999;
+	padding: 4px 0;
+}
+
+.woi-admin-image-menu[hidden] {
+	display: none;
+}
+
+.woi-admin-image-menu-item {
+	display: block;
+	width: 100%;
+	padding: 8px 12px;
+	background: none;
+	border: none;
+	text-align: left;
+	font-size: 13px;
+	line-height: 1.4;
+	cursor: pointer;
+	color: #2271b1;
+	transition: background-color 0.1s ease;
+}
+
+.woi-admin-image-menu-item:hover,
+.woi-admin-image-menu-item:focus {
+	background-color: #f0f6fc;
+	outline: none;
+}
+
+.woi-admin-image-menu-item:active {
+	background-color: #e6f0f8;
 }
 
 .woi-admin-crop-modal[hidden] {

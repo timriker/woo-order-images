@@ -4,7 +4,7 @@ Tags: woocommerce, product images, image upload, printing, puzzle
 Requires at least: 6.8
 Tested up to: 6.9.4
 Requires PHP: 7.4
-Stable tag: 0.7.1
+Stable tag: 0.7.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -69,6 +69,11 @@ This plugin bundles the following third-party library:
   * https://github.com/YahnisElsts/plugin-update-checker
 
 == Changelog ==
+
+= 0.7.2 =
+* Redesigned admin order image interaction: replaced hover-reveal edit button with click-activated popup menu offering "View Image" and "Adjust Crop" options.
+* Improved touch device UX: all image actions now accessible via click, eliminating iPad hover state issues.
+* Fixed event delegation for menu triggers to use delegated click handler on document, ensuring all thumbnail buttons respond to clicks.
 
 = 0.7.1 =
 * Added a `Print Sheet` action in the WooCommerce admin Orders list `Actions` column for orders with WOI images, with compatibility across both order-action hook paths.

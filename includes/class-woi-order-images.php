@@ -27,7 +27,6 @@ class WOI_Order_Images {
 	public function init() {
 		add_action( 'admin_init', array( $this, 'maybe_run_legacy_order_image_meta_migration' ) );
 		add_action( 'admin_notices', array( $this, 'maybe_show_legacy_order_image_meta_migration_notice' ) );
-		add_filter( 'woocommerce_add_to_cart_validation', array( $this, 'validate_required_images' ), 10, 5 );
 		add_filter( 'woocommerce_add_cart_item_data', array( $this, 'add_cart_item_data' ), 10, 4 );
 		add_filter( 'woocommerce_add_to_cart_redirect', array( $this, 'redirect_after_add_to_cart' ), 10, 2 );
 		add_action( 'woocommerce_add_to_cart', array( $this, 'replace_updated_cart_item' ), 10, 6 );
@@ -42,6 +41,7 @@ class WOI_Order_Images {
 		add_filter( 'woocommerce_hidden_order_itemmeta', array( $this, 'hide_order_item_meta' ), 10, 1 );
 		add_action( 'woocommerce_check_cart_items', array( $this, 'validate_cart_items' ) );
 		add_action( 'woocommerce_checkout_create_order_line_item', array( $this, 'add_order_item_meta' ), 10, 4 );
+		add_action( 'woocommerce_checkout_order_created', array( $this, 'validate_checkout_images' ), 10, 1 );
 	}
 
 	public function maybe_run_legacy_order_image_meta_migration() {
@@ -417,73 +417,6 @@ class WOI_Order_Images {
 		return '';
 	}
 
-	public function cleanup_order_images_on_wp_trash( $post_id, $previous_status ) {
-		if ( 'shop_order' !== get_post_type( $post_id ) ) {
-			return;
-		}
-
-		$this->cleanup_order_images_for_order( (int) $post_id );
-	}
-
-	public function cleanup_order_images_on_order_trash( $order_id ) {
-		$this->cleanup_order_images_for_order( (int) $order_id );
-	}
-
-	private function cleanup_order_images_for_order( $order_id ) {
-		if ( $order_id <= 0 ) {
-			return;
-		}
-
-		$order = wc_get_order( $order_id );
-		if ( ! $order ) {
-			return;
-		}
-
-		$uploads = wp_upload_dir();
-		if ( empty( $uploads['basedir'] ) ) {
-			return;
-		}
-
-		$woi_base_path = wp_normalize_path( trailingslashit( $uploads['basedir'] ) . 'woo-order-images/' );
-		$paths_to_delete = array();
-
-		foreach ( $order->get_items() as $item ) {
-			if ( ! $item instanceof WC_Order_Item_Product ) {
-				continue;
-			}
-
-			$images = $item->get_meta( self::ORDER_META_IMAGES, true );
-			if ( empty( $images ) || ! is_array( $images ) ) {
-				continue;
-			}
-
-			foreach ( $images as $image ) {
-				$url = is_array( $image ) && ! empty( $image['url'] ) ? (string) $image['url'] : '';
-				if ( ! is_string( $url ) || '' === trim( $url ) ) {
-					continue;
-				}
-
-				$path = $this->url_to_upload_path( $url );
-				if ( ! $path ) {
-					continue;
-				}
-
-				$normalized_path = wp_normalize_path( $path );
-				if ( 0 !== strpos( $normalized_path, $woi_base_path ) ) {
-					continue;
-				}
-
-				$paths_to_delete[ $normalized_path ] = true;
-			}
-		}
-
-		foreach ( array_keys( $paths_to_delete ) as $path ) {
-			if ( is_file( $path ) ) {
-				@unlink( $path );
-			}
-		}
-	}
-
 	public function filter_add_to_cart_message_html( $message, $products ) {
 		$update_cart_key = isset( $_REQUEST['update_cart'] ) ? wc_clean( wp_unslash( $_REQUEST['update_cart'] ) ) : '';
 		if ( '' === $update_cart_key ) {
@@ -507,10 +440,6 @@ class WOI_Order_Images {
 		if ( $update_cart_key !== $new_cart_item_key ) {
 			WC()->cart->remove_cart_item( $update_cart_key );
 		}
-	}
-
-	public function validate_required_images( $passed, $product_id, $quantity, $variation_id = 0, $variations = array() ) {
-		return $passed;
 	}
 
 	public function redirect_after_add_to_cart( $url, $adding_to_cart = null ) {
@@ -1502,5 +1431,67 @@ class WOI_Order_Images {
 			'path' => $path,
 			'url'  => $url,
 		);
+	}
+
+	/**
+	 * Validate images after order creation during checkout.
+	 * If validation fails, prevents order completion and leaves it in pending state.
+	 *
+	 * @param WC_Order $order The created order object.
+	 *
+	 * @throws Exception If validation fails.
+	 */
+	public function validate_checkout_images( $order ) {
+		if ( ! $order ) {
+			return;
+		}
+
+		$missing_items = array();
+
+		foreach ( $order->get_items() as $item ) {
+			$product_id = $item->get_product_id();
+			if ( $product_id <= 0 ) {
+				continue;
+			}
+
+			$enabled = get_post_meta( $product_id, WOI_Admin_Product_Settings::META_ENABLED, true );
+			if ( 'yes' !== $enabled ) {
+				continue;
+			}
+
+			$required_per_qty = (int) get_post_meta( $product_id, WOI_Admin_Product_Settings::META_REQUIRED_COUNT, true );
+			$required_per_qty = max( 1, $required_per_qty );
+			$qty              = $item->get_quantity();
+			$required_total   = $required_per_qty * $qty;
+
+			// Check for images in order item meta
+			$images = $item->get_meta( self::ORDER_META_IMAGES );
+			$current_images = is_array( $images ) ? count( $images ) : 0;
+
+			if ( $current_images !== $required_total ) {
+				$missing_items[] = array(
+					'name'     => $item->get_name(),
+					'required' => $required_total,
+					'current'  => $current_images,
+					'qty'      => $qty,
+					'product_id' => $product_id,
+				);
+			}
+		}
+
+		if ( ! empty( $missing_items ) ) {
+			$item = $missing_items[0];
+
+			// Leave order in pending state so customer can edit cart and upload images
+			throw new Exception(
+				sprintf(
+					__( 'Product "%1$s" requires %2$d image(s) for quantity %3$d, but %4$d are attached. Please upload the required images before checkout.', 'woo-order-images' ),
+					$item['name'],
+					$item['required'],
+					$item['qty'],
+					$item['current']
+				)
+			);
+		}
 	}
 }

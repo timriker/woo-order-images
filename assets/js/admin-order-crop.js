@@ -1,8 +1,8 @@
 (function () {
-	const editButtons = document.querySelectorAll('[data-woi-admin-edit-crop]');
+	const menuTriggers = document.querySelectorAll('[data-woi-admin-image-menu-trigger]');
 	const modal = document.querySelector('[data-woi-admin-crop-modal]');
 
-	if (!editButtons.length || !modal || typeof Cropper === 'undefined' || typeof window.woiAdminCrop !== 'object') {
+	if (!menuTriggers.length || !modal || typeof Cropper === 'undefined' || typeof window.woiAdminCrop !== 'object') {
 		return;
 	}
 
@@ -42,6 +42,8 @@
 		cropMinZoom: null,
 		cropMaxZoom: null,
 	};
+
+	let activeMenu = null; // Track which menu is currently open
 
 	const parseJSON = (value, fallback) => {
 		try {
@@ -403,12 +405,113 @@
 		}
 	};
 
-	editButtons.forEach((button) => {
-		button.addEventListener('click', (event) => {
-			event.preventDefault();
-			hydrateStateFromButton(button);
-			openModal();
+	const createMenuElement = () => {
+		const menu = document.createElement('div');
+		menu.className = 'woi-admin-image-menu';
+		menu.setAttribute('role', 'menu');
+		menu.setAttribute('aria-label', config.menuLabel || 'Image options');
+
+		const viewButton = document.createElement('button');
+		viewButton.type = 'button';
+		viewButton.className = 'woi-admin-image-menu-item';
+		viewButton.setAttribute('role', 'menuitem');
+		viewButton.textContent = config.viewLabel || 'View Image';
+
+		const editButton = document.createElement('button');
+		editButton.type = 'button';
+		editButton.className = 'woi-admin-image-menu-item';
+		editButton.setAttribute('role', 'menuitem');
+		editButton.textContent = config.editLabel || 'Adjust Crop';
+
+		menu.appendChild(viewButton);
+		menu.appendChild(editButton);
+
+		return { menu, viewButton, editButton };
+	};
+
+	const closeAllMenus = () => {
+		if (activeMenu) {
+			activeMenu.menu.remove();
+			activeMenu.trigger.setAttribute('aria-expanded', 'false');
+			activeMenu = null;
+		}
+	};
+
+	const openMenu = (trigger) => {
+		closeAllMenus();
+
+		const { menu, viewButton, editButton } = createMenuElement();
+		const imageUrl = trigger.getAttribute('data-image-url');
+
+		viewButton.addEventListener('click', () => {
+			window.open(imageUrl, '_blank', 'noopener,noreferrer');
+			closeAllMenus();
 		});
+
+		editButton.addEventListener('click', () => {
+			hydrateStateFromButton(trigger);
+			openModal();
+			closeAllMenus();
+		});
+
+		document.body.appendChild(menu);
+
+		const triggerRect = trigger.getBoundingClientRect();
+		const menuWidth = 160;
+		const menuHeight = menu.offsetHeight;
+		let left = triggerRect.right + 8;
+		let top = triggerRect.top;
+
+		// Adjust if menu goes off-screen to the right
+		if (left + menuWidth > window.innerWidth - 8) {
+			left = triggerRect.left - menuWidth - 8;
+		}
+
+		// Adjust if menu goes off-screen below
+		if (top + menuHeight > window.innerHeight - 8) {
+			top = window.innerHeight - menuHeight - 8;
+		}
+
+		menu.style.left = `${left}px`;
+		menu.style.top = `${top}px`;
+		trigger.setAttribute('aria-expanded', 'true');
+
+		activeMenu = { menu, trigger };
+
+		// Close menu when clicking outside
+		const closeOnClickOutside = (event) => {
+			if (!menu.contains(event.target) && event.target !== trigger) {
+				closeAllMenus();
+				document.removeEventListener('click', closeOnClickOutside);
+			}
+		};
+
+		document.addEventListener('click', closeOnClickOutside);
+
+		// Close menu on Escape
+		const closeOnEscape = (event) => {
+			if (event.key === 'Escape') {
+				closeAllMenus();
+				document.removeEventListener('keydown', closeOnEscape);
+				trigger.focus();
+			}
+		};
+
+		document.addEventListener('keydown', closeOnEscape);
+	};
+
+	// Set initial aria-expanded on all triggers
+	menuTriggers.forEach((trigger) => {
+		trigger.setAttribute('aria-expanded', 'false');
+	});
+
+	// Use event delegation to handle clicks on menu triggers
+	document.addEventListener('click', (event) => {
+		const trigger = event.target.closest('[data-woi-admin-image-menu-trigger]');
+		if (trigger) {
+			event.preventDefault();
+			openMenu(trigger);
+		}
 	});
 
 	swapButton.addEventListener('click', () => {

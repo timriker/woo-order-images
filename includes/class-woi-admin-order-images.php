@@ -61,6 +61,8 @@ class WOI_Admin_Order_Images {
 				'ajaxUrl'               => admin_url( 'admin-ajax.php' ),
 				'nonce'                 => wp_create_nonce( 'woi_admin_update_order_crop' ),
 				'editLabel'             => __( 'Adjust crop', 'woo-order-images' ),
+				'viewLabel'             => __( 'View Image', 'woo-order-images' ),
+				'menuLabel'             => __( 'Image options', 'woo-order-images' ),
 				'saveLabel'             => __( 'Save Crop', 'woo-order-images' ),
 				'cancelLabel'           => __( 'Cancel', 'woo-order-images' ),
 				'swapPortraitLabel'     => __( 'Swap to Portrait', 'woo-order-images' ),
@@ -194,12 +196,7 @@ class WOI_Admin_Order_Images {
 			$thumbnail_html = WOI_Order_Images::render_thumbnail_html_static( $url, $crop, (int) $grid['cols'], (int) $grid['rows'], $spec['visible_width'], $spec['visible_height'], 72, 'woi-admin' );
 
 			echo '<span class="woi-admin-image-thumb">';
-			echo '<a href="' . esc_url( $url ) . '" target="_blank" rel="noopener noreferrer" title="' . esc_attr( $index_label ) . '">';
-			echo '<span class="woi-admin-image-frame" data-woi-admin-thumb-frame style="display:block;aspect-ratio:' . esc_attr( $frame_ratio ) . ';overflow:hidden;border:1px solid #ccd0d4;border-radius:4px;background:#f6f7f7;position:relative;">';
-			echo $thumbnail_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
-			echo '</span>';
-			echo '</a>';
-			echo '<button type="button" class="button-link woi-admin-image-edit" data-woi-admin-edit-crop'
+			echo '<button type="button" class="woi-admin-image-menu-trigger" data-woi-admin-image-menu-trigger'
 				. ' data-item-id="' . esc_attr( $item_id ) . '"'
 				. ' data-image-index="' . esc_attr( $index ) . '"'
 				. ' data-image-url="' . esc_url( $url ) . '"'
@@ -216,9 +213,12 @@ class WOI_Admin_Order_Images {
 				. ' data-puzzle-rows="' . esc_attr( (int) $base_spec['puzzle_rows'] ) . '"'
 				. ' data-current-puzzle-cols="' . esc_attr( (int) $grid['cols'] ) . '"'
 				. ' data-current-puzzle-rows="' . esc_attr( (int) $grid['rows'] ) . '"'
-				. ' title="' . esc_attr__( 'Adjust crop', 'woo-order-images' ) . '"'
-				. ' aria-label="' . esc_attr( sprintf( __( 'Adjust crop for %s', 'woo-order-images' ), $index_label ) ) . '">'
-				. '<span aria-hidden="true">✎</span></button>';
+				. ' title="' . esc_attr( $index_label ) . '"'
+				. ' aria-label="' . esc_attr( sprintf( __( '%s - click for options', 'woo-order-images' ), $index_label ) ) . '">'
+				. '<span class="woi-admin-image-frame" data-woi-admin-thumb-frame style="display:block;aspect-ratio:' . esc_attr( $frame_ratio ) . ';overflow:hidden;border:1px solid #ccd0d4;border-radius:4px;background:#f6f7f7;position:relative;">'
+				. $thumbnail_html
+				. '</span>'
+				. '</button>';
 			echo '</span>';
 		}
 
