@@ -101,8 +101,12 @@ class WOI_Frontend {
 						foreach ( $cart_item[ WOI_Order_Images::CART_KEY ] as $image ) {
 							if ( is_array( $image ) && ! empty( $image['url'] ) ) {
 								$entry = array(
-									'url'  => esc_url_raw( $image['url'] ),
-									'crop' => isset( $image['crop'] ) && is_array( $image['crop'] ) ? $image['crop'] : array(),
+									'url'         => esc_url_raw( $image['url'] ),
+									'crop'        => isset( $image['crop'] ) && is_array( $image['crop'] ) ? $image['crop'] : array(),
+									'orientation' => isset( $image['orientation'] ) ? (string) $image['orientation'] : '',
+									'rotation'    => isset( $image['rotation'] ) ? (int) $image['rotation'] : 0,
+									'puzzle_cols' => isset( $image['puzzle_cols'] ) ? (int) $image['puzzle_cols'] : 0,
+									'puzzle_rows' => isset( $image['puzzle_rows'] ) ? (int) $image['puzzle_rows'] : 0,
 								);
 								$existing_images[] = $entry;
 							} elseif ( is_string( $image ) && '' !== $image ) {

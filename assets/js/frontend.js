@@ -91,41 +91,6 @@
 			return normalized < 0 ? normalized + 360 : normalized;
 		};
 
-		/**
-		 * Rotate an image 90 degrees clockwise using canvas bitmap rotation.
-		 * Creates a new blob URL with the rotated result.
-		 * @param {string} imageUrl - URL of the image to rotate
-		 * @returns {Promise<string>} Blob URL of the rotated image
-		 */
-		const rotateImageUrl90 = (imageUrl) => new Promise((resolve, reject) => {
-			const image = new Image();
-			image.onload = () => {
-				const canvas = document.createElement('canvas');
-				canvas.width = image.naturalHeight;
-				canvas.height = image.naturalWidth;
-				const ctx = canvas.getContext('2d');
-				if (!ctx) {
-					reject(new Error('Unable to create image context.'));
-					return;
-				}
-
-				ctx.translate(canvas.width / 2, canvas.height / 2);
-				ctx.rotate(Math.PI / 2);
-				ctx.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2);
-
-				canvas.toBlob((blob) => {
-					if (!blob) {
-						reject(new Error('Unable to rotate image.'));
-						return;
-					}
-
-					resolve(URL.createObjectURL(blob));
-				}, 'image/png');
-			};
-			image.onerror = () => reject(new Error('Unable to load image.'));
-			image.src = imageUrl;
-		});
-
 		const syncSliderFromCropper = () => {
 			if (!state.cropper || !zoomSlider || !zoomValue) { return; }
 			const imgData = state.cropper.getImageData();
@@ -240,6 +205,39 @@
 			puzzleGrid.style.height = `${cropBox.height}px`;
 		};
 
+		const applySavedCropViewport = (cropper, slot) => {
+			if (!cropper || !slot || !slot.crop || slot.crop.width <= 0 || slot.crop.height <= 0) {
+				return false;
+			}
+
+			const cropBox = cropper.getCropBoxData();
+			if (!cropBox || cropBox.width <= 0 || cropBox.height <= 0) {
+				return false;
+			}
+
+			const cropWidth = parseFloat(slot.crop.width || 0);
+			const cropHeight = parseFloat(slot.crop.height || 0);
+			if (cropWidth <= 0 || cropHeight <= 0) {
+				return false;
+			}
+
+			const ratioX = cropBox.width / cropWidth;
+			const ratioY = cropBox.height / cropHeight;
+			const targetRatio = Math.min(ratioX, ratioY);
+
+			if (!(targetRatio > 0)) {
+				return false;
+			}
+
+			cropper.zoomTo(targetRatio);
+
+			const targetLeft = cropBox.left - (parseFloat(slot.crop.x || 0) * targetRatio);
+			const targetTop = cropBox.top - (parseFloat(slot.crop.y || 0) * targetRatio);
+			cropper.moveTo(targetLeft, targetTop);
+
+			return true;
+		};
+
 		const detectImageOrientation = (fileUrl) => new Promise((resolve) => {
 			const image = new Image();
 			image.onload = () => {
@@ -248,6 +246,28 @@
 			image.onerror = () => resolve(defaultOrientation);
 			image.src = fileUrl;
 		});
+
+		const getOrientationForRotation = (orientation, rotation) => {
+			if (isSquare || orientation === 'square') {
+				return 'square';
+			}
+
+			const normalizedRotation = normalizeRotation(rotation || 0);
+			if (normalizedRotation === 90 || normalizedRotation === 270) {
+				return orientation === 'portrait' ? 'landscape' : 'portrait';
+			}
+
+			return orientation;
+		};
+
+		const detectRenderedOrientation = async (fileUrl, rotation = 0) => {
+			if (isSquare) {
+				return 'square';
+			}
+
+			const baseOrientation = await detectImageOrientation(fileUrl);
+			return getOrientationForRotation(baseOrientation, rotation);
+		};
 
 		/**
 		 * Revoke blob URLs to prevent memory leaks.
@@ -347,7 +367,7 @@
 			slot.sourceUrl = result.data.url;
 			slot.previewData = '';
 			slot.crop = null;
-			slot.orientation = isSquare ? 'square' : await detectImageOrientation(slot.fileUrl);
+			slot.orientation = await detectRenderedOrientation(slot.fileUrl, 0);
 			if (isPuzzle) {
 				const grid = getPuzzleGridForOrientation(slot.orientation);
 				slot.puzzleCols = grid.cols;
@@ -497,6 +517,11 @@
 					if (!cropper) {
 						return;
 					}
+
+					const effectiveRotation = normalizeRotation(slot.rotation || 0);
+					if (effectiveRotation !== 0) {
+						cropper.rotateTo(effectiveRotation);
+					}
 					// Place crop box precisely over the visible area (centred within bleed container)
 					const containerData = cropper.getContainerData();
 					const geo = state.cropGeometry;
@@ -513,6 +538,7 @@
 						if (!state.cropper) {
 							return;
 						}
+						const hasSavedCrop = applySavedCropViewport(cropper, slot);
 						const settledCropBox = cropper.getCropBoxData();
 						const effectiveCropW = settledCropBox && settledCropBox.width > 0 ? settledCropBox.width : cropW;
 						const effectiveCropH = settledCropBox && settledCropBox.height > 0 ? settledCropBox.height : cropH;
@@ -525,7 +551,7 @@
 						);
 						state.cropMaxZoom = currentRatio * 4;
 
-						if (state.cropMinZoom !== null && currentRatio > state.cropMinZoom) {
+						if (!hasSavedCrop && state.cropMinZoom !== null && currentRatio > state.cropMinZoom) {
 							cropper.zoomTo(state.cropMinZoom);
 						}
 
@@ -662,64 +688,22 @@
 			openModalForSlot(state.activeIndex);
 		});
 
-		rotateButton.addEventListener('click', () => {
+		rotateButton.addEventListener('click', async () => {
 			if (!state.cropper || state.activeIndex < 0 || !state.slots[state.activeIndex]) {
 				return;
 			}
 
 			const slot = state.slots[state.activeIndex];
-			rotateImageUrl90(slot.fileUrl)
-				.then(async (rotatedUrl) => {
-					cleanupSlotUrl(slot);
-					slot.fileUrl = rotatedUrl;
-					const dataUrl = await new Promise((resolve, reject) => {
-						fetch(rotatedUrl)
-							.then((response) => response.blob())
-							.then((blob) => {
-								const reader = new FileReader();
-								reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
-								reader.onerror = () => reject(new Error('Unable to read rotated image.'));
-								reader.readAsDataURL(blob);
-							})
-							.catch(() => reject(new Error('Unable to read rotated image.')));
-					});
-
-					if (!ajaxConfig || !ajaxConfig.ajaxUrl || !ajaxConfig.nonce) {
-						throw new Error('Image upload endpoint is unavailable.');
-					}
-
-					const formData = new FormData();
-					formData.append('action', 'woi_stage_image_upload');
-					formData.append('nonce', ajaxConfig.nonce);
-					formData.append('source', dataUrl);
-
-					const response = await fetch(ajaxConfig.ajaxUrl, {
-						method: 'POST',
-						credentials: 'same-origin',
-						body: formData,
-					});
-
-					const result = await response.json().catch(() => ({}));
-					if (!response.ok || !result || result.success !== true || !result.data || !result.data.url) {
-						throw new Error('Unable to stage rotated image upload.');
-					}
-
-					slot.sourceData = '';
-						slot.sourceUrl = result.data.url;
-						slot.previewData = '';
-						slot.crop = null;
-						slot.orientation = isSquare ? 'square' : await detectImageOrientation(slot.fileUrl);
-						if (isPuzzle) {
-							const grid = getPuzzleGridForOrientation(slot.orientation);
-							slot.puzzleCols = grid.cols;
-							slot.puzzleRows = grid.rows;
-						}
-						slot.rotation = 0;
-						openModalForSlot(state.activeIndex);
-					})
-				.catch(() => {
-					window.alert('Unable to rotate this image right now.');
-				});
+			slot.rotation = normalizeRotation((slot.rotation || 0) + 90);
+			slot.previewData = '';
+			slot.crop = null;
+			slot.orientation = await detectRenderedOrientation(slot.fileUrl, slot.rotation);
+			if (isPuzzle) {
+				const grid = getPuzzleGridForOrientation(slot.orientation);
+				slot.puzzleCols = grid.cols;
+				slot.puzzleRows = grid.rows;
+			}
+			openModalForSlot(state.activeIndex);
 		});
 
 		saveCropButton.addEventListener('click', async () => {
@@ -876,17 +860,17 @@
 					? entry.crop
 					: null;
 
-				// Restore saved orientation if available, otherwise detect
-				const savedOrientation = entry && typeof entry === 'object' && typeof entry.orientation === 'string'
-					? entry.orientation
-					: null;
-				state.slots[index].orientation = savedOrientation || (isSquare ? 'square' : await detectImageOrientation(imageUrl));
-
-				// Restore saved rotation if available
 				const savedRotation = entry && typeof entry === 'object' && typeof entry.rotation === 'number'
 					? entry.rotation
 					: 0;
 				state.slots[index].rotation = savedRotation;
+
+				// Restore saved orientation if available, otherwise detect against the rendered orientation.
+				const detectedOrientation = await detectRenderedOrientation(imageUrl, savedRotation);
+				const savedOrientation = entry && typeof entry === 'object' && typeof entry.orientation === 'string'
+					? entry.orientation
+					: null;
+				state.slots[index].orientation = savedOrientation || detectedOrientation;
 
 				if (isPuzzle) {
 					const entryCols = entry && typeof entry === 'object' ? parseInt(entry.puzzle_cols || '0', 10) : 0;

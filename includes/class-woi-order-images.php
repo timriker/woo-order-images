@@ -341,20 +341,7 @@ class WOI_Order_Images {
 		}
 
 		$source_path = $this->url_to_upload_path( $source_url );
-		$extension   = strtolower( pathinfo( wp_parse_url( $source_url, PHP_URL_PATH ), PATHINFO_EXTENSION ) );
-		if ( '' === $extension ) {
-			$extension = 'jpg';
-		}
-
-		$ext_map = array(
-			'jpeg' => 'jpg',
-			'jpg'  => 'jpg',
-			'png'  => 'png',
-			'webp' => 'webp',
-		);
-		if ( isset( $ext_map[ $extension ] ) ) {
-			$extension = $ext_map[ $extension ];
-		}
+		$extension   = $this->normalize_migrated_upload_extension( $source_url );
 
 		$subfolder = gmdate( 'Y/m' );
 		$dest_dir  = trailingslashit( $uploads['basedir'] ) . 'woo-order-images/' . $subfolder . '/';
@@ -362,8 +349,7 @@ class WOI_Order_Images {
 			return '';
 		}
 
-		$hash             = md5( $source_url );
-		$target_filename  = 'woi-migrated-' . substr( $hash, 0, 16 ) . '.' . $extension;
+		$target_filename  = $this->get_migrated_upload_filename( $source_url, $extension );
 		$target_path      = $dest_dir . $target_filename;
 		$target_url       = $woi_baseurl . $subfolder . '/' . $target_filename;
 
@@ -383,13 +369,50 @@ class WOI_Order_Images {
 		return esc_url_raw( $target_url );
 	}
 
+	private function normalize_migrated_upload_extension( $source_url ) {
+		$extension = strtolower( pathinfo( (string) wp_parse_url( $source_url, PHP_URL_PATH ), PATHINFO_EXTENSION ) );
+		if ( '' === $extension ) {
+			return 'jpg';
+		}
+
+		$ext_map = array(
+			'jpeg' => 'jpg',
+			'jpg'  => 'jpg',
+			'png'  => 'png',
+			'webp' => 'webp',
+		);
+
+		return isset( $ext_map[ $extension ] ) ? $ext_map[ $extension ] : 'jpg';
+	}
+
+	private function get_migrated_upload_filename( $source_url, $extension ) {
+		$source_url = is_string( $source_url ) ? trim( $source_url ) : '';
+		$extension  = is_string( $extension ) ? strtolower( trim( $extension ) ) : '';
+
+		if ( '' === $source_url ) {
+			return '';
+		}
+
+		if ( '' === $extension ) {
+			$extension = $this->normalize_migrated_upload_extension( $source_url );
+		}
+
+		$hash = md5( $source_url );
+		return 'woi-migrated-' . substr( $hash, 0, 16 ) . '.' . $extension;
+	}
+
 	private function find_previously_migrated_woi_url_for_source( $source_url, $extension ) {
 		$uploads = wp_upload_dir();
 		if ( ! empty( $uploads['error'] ) || empty( $uploads['baseurl'] ) || empty( $uploads['basedir'] ) ) {
 			return '';
 		}
 
-		$pattern = trailingslashit( $uploads['basedir'] ) . 'woo-order-images/*/*/woi-migrated-*.' . $extension;
+		$filename = $this->get_migrated_upload_filename( $source_url, $extension );
+		if ( '' === $filename ) {
+			return '';
+		}
+
+		$pattern = trailingslashit( $uploads['basedir'] ) . 'woo-order-images/*/*/' . $filename;
 		$files   = glob( $pattern );
 		if ( ! is_array( $files ) || empty( $files ) ) {
 			return '';
@@ -400,9 +423,7 @@ class WOI_Order_Images {
 
 		foreach ( $files as $file ) {
 			$normalized_file = wp_normalize_path( $file );
-			$expected_hash   = substr( md5( $source_url . '|' . filesize( $file ) . '|' . filemtime( $file ) ), 0, 16 );
-			$expected_name   = 'woi-migrated-' . $expected_hash . '.' . $extension;
-			if ( basename( $file ) !== $expected_name ) {
+			if ( ! is_file( $normalized_file ) ) {
 				continue;
 			}
 
@@ -494,6 +515,7 @@ class WOI_Order_Images {
 		$max_side   = isset( $_GET['s'] ) ? absint( wp_unslash( $_GET['s'] ) ) : 220;
 		$puzzle_cols = isset( $_GET['pc'] ) ? absint( wp_unslash( $_GET['pc'] ) ) : 0;
 		$puzzle_rows = isset( $_GET['pr'] ) ? absint( wp_unslash( $_GET['pr'] ) ) : 0;
+		$rotation    = isset( $_GET['rot'] ) ? self::normalize_rotation_value( wp_unslash( $_GET['rot'] ) ) : 0;
 
 		if ( ! $this->is_valid_existing_upload_url( $source_url ) ) {
 			status_header( 404 );
@@ -507,7 +529,7 @@ class WOI_Order_Images {
 			'height' => isset( $_GET['h'] ) ? (float) wp_unslash( $_GET['h'] ) : 0.0,
 		);
 
-		$jpeg = $this->build_thumbnail_jpeg( $source_url, $crop, max( 32, $max_side ), $puzzle_cols, $puzzle_rows );
+		$jpeg = $this->build_thumbnail_jpeg( $source_url, $crop, max( 32, $max_side ), $puzzle_cols, $puzzle_rows, $rotation );
 		if ( empty( $jpeg ) ) {
 			status_header( 404 );
 			exit;
@@ -520,6 +542,7 @@ class WOI_Order_Images {
 				's'    => max( 32, $max_side ),
 				'pc'   => $puzzle_cols,
 				'pr'   => $puzzle_rows,
+				'rot'  => $rotation,
 			)
 		);
 		$etag = '"' . substr( md5( (string) $etag_seed ), 0, 12 ) . '"';
@@ -547,10 +570,8 @@ class WOI_Order_Images {
 	}
 
 	public function add_cart_item_data( $cart_item_data, $product_id, $variation_id, $quantity ) {
-		$product_id_for_meta = $variation_id ? $variation_id : $product_id;
-		$enabled             = get_post_meta( $product_id_for_meta, WOI_Admin_Product_Settings::META_ENABLED, true );
-
-		if ( 'yes' !== $enabled ) {
+		$product_id_for_meta = $this->resolve_enabled_woi_product_id( $variation_id, $product_id );
+		if ( $product_id_for_meta <= 0 ) {
 			return $cart_item_data;
 		}
 
@@ -604,10 +625,7 @@ class WOI_Order_Images {
 
 		if ( ! empty( $saved ) ) {
 			$cart_item_data[ self::CART_KEY ] = $saved;
-			$required_per_qty = max( 1, (int) get_post_meta( $product_id_for_meta, WOI_Admin_Product_Settings::META_REQUIRED_COUNT, true ) );
-			if ( $is_puzzle ) {
-				$required_per_qty = 1;
-			}
+			$required_per_qty = $this->get_required_images_per_quantity_for_product( $product_id_for_meta );
 			$cart_item_data[ self::CART_REQUIRED_PER_QTY_KEY ] = $required_per_qty;
 			$cart_item_data[ self::CART_VISIBLE_WIDTH_KEY ] = $spec['visible_width'];
 			$cart_item_data[ self::CART_VISIBLE_HEIGHT_KEY ] = $spec['visible_height'];
@@ -630,19 +648,18 @@ class WOI_Order_Images {
 	}
 
 	public function render_cart_item_data( $item_data, $cart_item ) {
-		$product_id = isset( $cart_item['variation_id'] ) && $cart_item['variation_id'] ? $cart_item['variation_id'] : ( isset( $cart_item['product_id'] ) ? $cart_item['product_id'] : 0 );
-		$enabled    = get_post_meta( $product_id, WOI_Admin_Product_Settings::META_ENABLED, true );
-		if ( 'yes' !== $enabled && ! empty( $cart_item['product_id'] ) && (int) $cart_item['product_id'] !== (int) $product_id ) {
-			$product_id = (int) $cart_item['product_id'];
-			$enabled    = get_post_meta( $product_id, WOI_Admin_Product_Settings::META_ENABLED, true );
-		}
-		if ( 'yes' !== $enabled ) {
+		$product_id = $this->resolve_enabled_woi_product_id(
+			isset( $cart_item['variation_id'] ) ? (int) $cart_item['variation_id'] : 0,
+			isset( $cart_item['product_id'] ) ? (int) $cart_item['product_id'] : 0
+		);
+		if ( $product_id <= 0 ) {
 			return $item_data;
 		}
 
 		$qty              = isset( $cart_item['quantity'] ) ? max( 1, (int) $cart_item['quantity'] ) : 1;
-		$required_per_qty = isset( $cart_item[ self::CART_REQUIRED_PER_QTY_KEY ] ) ? (int) $cart_item[ self::CART_REQUIRED_PER_QTY_KEY ] : (int) get_post_meta( $product_id, WOI_Admin_Product_Settings::META_REQUIRED_COUNT, true );
-		$required_per_qty = max( 1, $required_per_qty );
+		$required_per_qty = isset( $cart_item[ self::CART_REQUIRED_PER_QTY_KEY ] )
+			? max( 1, (int) $cart_item[ self::CART_REQUIRED_PER_QTY_KEY ] )
+			: $this->get_required_images_per_quantity_for_product( $product_id );
 		$required_total   = $required_per_qty * $qty;
 		$images           = ( ! empty( $cart_item[ self::CART_KEY ] ) && is_array( $cart_item[ self::CART_KEY ] ) ) ? $cart_item[ self::CART_KEY ] : array();
 		$current          = count( $images );
@@ -764,18 +781,17 @@ class WOI_Order_Images {
 			}
 
 			$product = $cart_item['data'];
-			$product_id = $product->get_id();
-			$enabled    = get_post_meta( $product_id, WOI_Admin_Product_Settings::META_ENABLED, true );
-			if ( 'yes' !== $enabled && ! empty( $cart_item['product_id'] ) && (int) $cart_item['product_id'] !== (int) $product_id ) {
-				$product_id = (int) $cart_item['product_id'];
-				$enabled    = get_post_meta( $product_id, WOI_Admin_Product_Settings::META_ENABLED, true );
-			}
-			if ( 'yes' !== $enabled ) {
+			$product_id = $this->resolve_enabled_woi_product_id(
+				(int) $product->get_id(),
+				isset( $cart_item['product_id'] ) ? (int) $cart_item['product_id'] : 0
+			);
+			if ( $product_id <= 0 ) {
 				continue;
 			}
 
-			$required_per_qty = isset( $cart_item[ self::CART_REQUIRED_PER_QTY_KEY ] ) ? (int) $cart_item[ self::CART_REQUIRED_PER_QTY_KEY ] : (int) get_post_meta( $product_id, WOI_Admin_Product_Settings::META_REQUIRED_COUNT, true );
-			$required_per_qty = max( 1, $required_per_qty );
+			$required_per_qty = isset( $cart_item[ self::CART_REQUIRED_PER_QTY_KEY ] )
+				? max( 1, (int) $cart_item[ self::CART_REQUIRED_PER_QTY_KEY ] )
+				: $this->get_required_images_per_quantity_for_product( $product_id );
 			$qty              = isset( $cart_item['quantity'] ) ? max( 1, (int) $cart_item['quantity'] ) : 1;
 			$required_total   = $required_per_qty * $qty;
 			$current_images   = isset( $cart_item[ self::CART_KEY ] ) && is_array( $cart_item[ self::CART_KEY ] ) ? count( $cart_item[ self::CART_KEY ] ) : 0;
@@ -819,12 +835,17 @@ class WOI_Order_Images {
 		foreach ( $values[ self::CART_KEY ] as $image ) {
 			if ( ! empty( $image['url'] ) ) {
 				$url = esc_url_raw( $image['url'] );
-				$images[] = array(
+				$entry = array(
 					'url'         => $url,
 					'crop'        => isset( $image['crop'] ) && is_array( $image['crop'] ) ? $this->sanitize_crop_data( $image['crop'] ) : array(),
 					'puzzle_cols' => isset( $image['puzzle_cols'] ) ? max( 0, (int) $image['puzzle_cols'] ) : 0,
 					'puzzle_rows' => isset( $image['puzzle_rows'] ) ? max( 0, (int) $image['puzzle_rows'] ) : 0,
 				);
+				$rotation = isset( $image['rotation'] ) ? self::normalize_rotation_value( $image['rotation'] ) : 0;
+				if ( $rotation > 0 ) {
+					$entry['rotation'] = $rotation;
+				}
+				$images[] = $entry;
 			}
 		}
 
@@ -854,6 +875,7 @@ class WOI_Order_Images {
 					'crop'        => isset( $image['crop'] ) && is_array( $image['crop'] ) ? $image['crop'] : array(),
 					'puzzle_cols' => isset( $image['puzzle_cols'] ) ? max( 0, (int) $image['puzzle_cols'] ) : 0,
 					'puzzle_rows' => isset( $image['puzzle_rows'] ) ? max( 0, (int) $image['puzzle_rows'] ) : 0,
+					'rotation'    => isset( $image['rotation'] ) ? self::normalize_rotation_value( $image['rotation'] ) : 0,
 				);
 			} elseif ( is_string( $image ) && '' !== $image ) {
 				$image_entries[] = array(
@@ -861,6 +883,7 @@ class WOI_Order_Images {
 					'crop'        => array(),
 					'puzzle_cols' => 0,
 					'puzzle_rows' => 0,
+					'rotation'    => 0,
 				);
 			}
 		}
@@ -874,6 +897,7 @@ class WOI_Order_Images {
 		foreach ( $image_entries as $index => $entry ) {
 			$url  = isset( $entry['url'] ) ? (string) $entry['url'] : '';
 			$crop = isset( $entry['crop'] ) && is_array( $entry['crop'] ) ? $entry['crop'] : array();
+			$rotation = isset( $entry['rotation'] ) ? self::normalize_rotation_value( $entry['rotation'] ) : 0;
 			if ( '' === $url ) {
 				continue;
 			}
@@ -881,7 +905,7 @@ class WOI_Order_Images {
 			$puzzle_cols = isset( $entry['puzzle_cols'] ) ? max( 0, (int) $entry['puzzle_cols'] ) : 0;
 			$puzzle_rows = isset( $entry['puzzle_rows'] ) ? max( 0, (int) $entry['puzzle_rows'] ) : 0;
 
-			$thumbnail_inner = $this->render_thumbnail_html( $url, $crop, $puzzle_cols, $puzzle_rows, $visible_width, $visible_height, 56, 'woi-inline' );
+			$thumbnail_inner = $this->render_thumbnail_html( $url, $crop, $puzzle_cols, $puzzle_rows, $visible_width, $visible_height, 56, 'woi-inline', $rotation );
 			if ( '' !== $thumbnail_inner ) {
 				$html .= '<span class="woi-inline-thumb-link" style="display:inline-block;line-height:0;position:relative;">';
 				$html .= '<a href="' . esc_url( $url ) . '" target="_blank" rel="noopener noreferrer" style="display:block;line-height:0;">';
@@ -896,7 +920,7 @@ class WOI_Order_Images {
 		return $html;
 	}
 
-	private function get_oriented_ratio_from_image_entry( $url, $crop, $visible_width, $visible_height, $puzzle_cols = 0, $puzzle_rows = 0 ) {
+	private function get_oriented_ratio_from_image_entry( $url, $crop, $visible_width, $visible_height, $puzzle_cols = 0, $puzzle_rows = 0, $rotation = 0 ) {
 		if ( $puzzle_cols > 0 && $puzzle_rows > 0 ) {
 			$overall_width  = (float) $visible_width * (float) $puzzle_cols;
 			$overall_height = (float) $visible_height * (float) $puzzle_rows;
@@ -928,19 +952,19 @@ class WOI_Order_Images {
 			}
 		}
 
-		return $this->get_oriented_ratio_from_url( $url, $visible_width, $visible_height );
+		return $this->get_oriented_ratio_from_url( $url, $visible_width, $visible_height, $rotation );
 	}
 
-	private function get_thumbnail_image_url( $source_url, $crop, $max_side = 220, $puzzle_cols = 0, $puzzle_rows = 0 ) {
+	private function get_thumbnail_image_url( $source_url, $crop, $max_side = 220, $puzzle_cols = 0, $puzzle_rows = 0, $rotation = 0 ) {
 		$url = is_string( $source_url ) ? trim( $source_url ) : '';
 		if ( '' === $url || ! $this->is_valid_existing_upload_url( $url ) ) {
 			return '';
 		}
 
-		return self::build_thumbnail_image_url( $url, $crop, $max_side, $puzzle_cols, $puzzle_rows );
+		return self::build_thumbnail_image_url( $url, $crop, $max_side, $puzzle_cols, $puzzle_rows, $rotation );
 	}
 
-	public static function build_thumbnail_image_url( $source_url, $crop, $max_side = 220, $puzzle_cols = 0, $puzzle_rows = 0 ) {
+	public static function build_thumbnail_image_url( $source_url, $crop, $max_side = 220, $puzzle_cols = 0, $puzzle_rows = 0, $rotation = 0 ) {
 		$url = is_string( $source_url ) ? trim( $source_url ) : '';
 		if ( '' === $url ) {
 			return '';
@@ -961,6 +985,7 @@ class WOI_Order_Images {
 		$max_side = max( 32, (int) $max_side );
 		$puzzle_cols = max( 0, (int) $puzzle_cols );
 		$puzzle_rows = max( 0, (int) $puzzle_rows );
+		$rotation = self::normalize_rotation_value( $rotation );
 
 		$args = array(
 			'action' => 'woi_thumb_image',
@@ -972,7 +997,8 @@ class WOI_Order_Images {
 			's'      => $max_side,
 			'pc'     => $puzzle_cols,
 			'pr'     => $puzzle_rows,
-			'v'      => substr( md5( wp_json_encode( array( $url, $crop_data, $max_side, $puzzle_cols, $puzzle_rows ) ) ), 0, 12 ),
+			'rot'    => $rotation,
+			'v'      => substr( md5( wp_json_encode( array( $url, $crop_data, $max_side, $puzzle_cols, $puzzle_rows, $rotation ) ) ), 0, 12 ),
 		);
 
 		return add_query_arg( $args, admin_url( 'admin-post.php' ) );
@@ -992,7 +1018,7 @@ class WOI_Order_Images {
 	 * @param string $class_prefix CSS class prefix ('woi-inline' for cart, 'woi-admin' for admin).
 	 * @return string HTML markup for thumbnail with grid overlay.
 	 */
-	public function render_thumbnail_html( $url, $crop, $puzzle_cols, $puzzle_rows, $visible_width, $visible_height, $base_size = 72, $class_prefix = 'woi-inline' ) {
+	public function render_thumbnail_html( $url, $crop, $puzzle_cols, $puzzle_rows, $visible_width, $visible_height, $base_size = 72, $class_prefix = 'woi-inline', $rotation = 0 ) {
 		$url  = is_string( $url ) ? trim( $url ) : '';
 		$crop = is_array( $crop ) ? $crop : array();
 		$puzzle_cols = max( 0, (int) $puzzle_cols );
@@ -1000,6 +1026,7 @@ class WOI_Order_Images {
 		$visible_width = max( 0.0001, (float) $visible_width );
 		$visible_height = max( 0.0001, (float) $visible_height );
 		$base_size = max( 24, (int) $base_size );
+		$rotation = self::normalize_rotation_value( $rotation );
 
 		if ( '' === $url ) {
 			return '';
@@ -1008,7 +1035,7 @@ class WOI_Order_Images {
 		$show_grid = $puzzle_cols > 1 || $puzzle_rows > 1;
 
 		// Calculate aspect ratio and display dimensions
-		$ratio = $this->get_oriented_ratio_from_image_entry( $url, $crop, $visible_width, $visible_height, $puzzle_cols, $puzzle_rows );
+		$ratio = $this->get_oriented_ratio_from_image_entry( $url, $crop, $visible_width, $visible_height, $puzzle_cols, $puzzle_rows, $rotation );
 		$display_size = $show_grid ? (int) round( $base_size * 2 ) : $base_size;
 
 		$display_w = $display_size;
@@ -1022,7 +1049,7 @@ class WOI_Order_Images {
 		}
 
 		// Get thumbnail source
-		$thumb_src = $this->get_thumbnail_image_url( $url, $crop, max( 64, $base_size * 3 ), $puzzle_cols, $puzzle_rows );
+		$thumb_src = $this->get_thumbnail_image_url( $url, $crop, max( 64, $base_size * 3 ), $puzzle_cols, $puzzle_rows, $rotation );
 		if ( '' === $thumb_src ) {
 			$thumb_src = $url;
 		}
@@ -1046,33 +1073,20 @@ class WOI_Order_Images {
 	 * @param string $class_prefix CSS class prefix.
 	 * @return string HTML markup for thumbnail with grid overlay.
 	 */
-	public static function render_thumbnail_html_static( $url, $crop, $puzzle_cols, $puzzle_rows, $visible_width, $visible_height, $base_size = 72, $class_prefix = 'woi-inline' ) {
+	public static function render_thumbnail_html_static( $url, $crop, $puzzle_cols, $puzzle_rows, $visible_width, $visible_height, $base_size = 72, $class_prefix = 'woi-inline', $rotation = 0 ) {
 		$instance = new self();
-		return $instance->render_thumbnail_html( $url, $crop, $puzzle_cols, $puzzle_rows, $visible_width, $visible_height, $base_size, $class_prefix );
+		return $instance->render_thumbnail_html( $url, $crop, $puzzle_cols, $puzzle_rows, $visible_width, $visible_height, $base_size, $class_prefix, $rotation );
 	}
 
-	private function build_thumbnail_jpeg( $source_url, $crop, $max_side = 220, $puzzle_cols = 0, $puzzle_rows = 0 ) {
-		$path = $this->url_to_upload_path( $source_url );
-		if ( ! $path || ! is_file( $path ) ) {
+	private function build_thumbnail_jpeg( $source_url, $crop, $max_side = 220, $puzzle_cols = 0, $puzzle_rows = 0, $rotation = 0 ) {
+		$prepared = $this->get_transformed_source_from_url( $source_url, $rotation );
+		if ( ! is_array( $prepared ) || empty( $prepared['image'] ) ) {
 			return null;
 		}
 
-		if ( ! function_exists( 'imagecreatefromstring' ) || ! function_exists( 'imagecreatetruecolor' ) ) {
-			return null;
-		}
-
-		$raw = @file_get_contents( $path );
-		if ( false === $raw || '' === $raw ) {
-			return null;
-		}
-
-		$source = @imagecreatefromstring( $raw );
-		if ( ! $source ) {
-			return null;
-		}
-
-		$src_w = imagesx( $source );
-		$src_h = imagesy( $source );
+		$source = $prepared['image'];
+		$src_w = (int) $prepared['width'];
+		$src_h = (int) $prepared['height'];
 		if ( $src_w <= 0 || $src_h <= 0 ) {
 			imagedestroy( $source );
 			return null;
@@ -1122,6 +1136,268 @@ class WOI_Order_Images {
 		}
 
 		return $jpeg;
+	}
+
+	public static function normalize_rotation_value( $rotation ) {
+		$normalized = (int) $rotation % 360;
+		return $normalized < 0 ? $normalized + 360 : $normalized;
+	}
+
+	public static function get_transformed_image_ratio_from_url( $url, $rotation = 0 ) {
+		$instance = new self();
+		$dimensions = $instance->get_transformed_dimensions_from_url( $url, $rotation );
+		if ( ! is_array( $dimensions ) || empty( $dimensions['width'] ) || empty( $dimensions['height'] ) ) {
+			return null;
+		}
+
+		return (float) $dimensions['width'] / (float) $dimensions['height'];
+	}
+
+	public static function load_transformed_source_from_url( $source_url, $rotation = 0 ) {
+		$instance = new self();
+		return $instance->get_transformed_source_from_url( $source_url, $rotation );
+	}
+
+	/**
+	 * Normalize JPEG source orientation using EXIF metadata so thumbnails match browser/cropper view.
+	 * This is runtime-only and does not modify source files.
+	 *
+	 * @param resource|GdImage $image GD image resource.
+	 * @param string           $path Source file path.
+	 * @return resource|GdImage
+	 */
+	private function normalize_source_orientation( $image, $path ) {
+		if ( ! $image || ! is_string( $path ) || '' === $path ) {
+			return $image;
+		}
+
+		if ( ! function_exists( 'exif_read_data' ) ) {
+			return $image;
+		}
+
+		$orientation = $this->get_exif_orientation( $path );
+		if ( 1 === $orientation ) {
+			return $image;
+		}
+
+		$normalized = $this->apply_exif_orientation_to_image( $image, $orientation );
+		if ( $normalized && $normalized !== $image ) {
+			imagedestroy( $image );
+			return $normalized;
+		}
+
+		return $image;
+	}
+
+	private function get_transformed_source_from_url( $source_url, $rotation = 0 ) {
+		$path = $this->url_to_upload_path( $source_url );
+		if ( ! $path || ! is_file( $path ) ) {
+			return null;
+		}
+
+		if ( ! function_exists( 'imagecreatefromstring' ) || ! function_exists( 'imagecreatetruecolor' ) ) {
+			return null;
+		}
+
+		$raw = @file_get_contents( $path );
+		if ( false === $raw || '' === $raw ) {
+			return null;
+		}
+
+		$source = @imagecreatefromstring( $raw );
+		if ( ! $source ) {
+			return null;
+		}
+
+		$source = $this->normalize_source_orientation( $source, $path );
+		$rotated = $this->apply_stored_rotation( $source, $rotation );
+		if ( $rotated && $rotated !== $source ) {
+			imagedestroy( $source );
+			$source = $rotated;
+		}
+
+		$src_w = imagesx( $source );
+		$src_h = imagesy( $source );
+		if ( $src_w <= 0 || $src_h <= 0 ) {
+			imagedestroy( $source );
+			return null;
+		}
+
+		return array(
+			'image' => $source,
+			'path'  => $path,
+			'width' => $src_w,
+			'height'=> $src_h,
+		);
+	}
+
+	private function get_transformed_dimensions_from_url( $url, $rotation = 0 ) {
+		$path = $this->url_to_upload_path( $url );
+		if ( ! $path || ! file_exists( $path ) ) {
+			return null;
+		}
+
+		$size = @getimagesize( $path );
+		if ( ! is_array( $size ) || empty( $size[0] ) || empty( $size[1] ) ) {
+			return null;
+		}
+
+		$width = (int) $size[0];
+		$height = (int) $size[1];
+		$orientation = $this->get_exif_orientation( $path );
+		if ( in_array( $orientation, array( 5, 6, 7, 8 ), true ) ) {
+			$temp = $width;
+			$width = $height;
+			$height = $temp;
+		}
+
+		$rotation = self::normalize_rotation_value( $rotation );
+		if ( in_array( $rotation, array( 90, 270 ), true ) ) {
+			$temp = $width;
+			$width = $height;
+			$height = $temp;
+		}
+
+		return array(
+			'width' => $width,
+			'height' => $height,
+		);
+	}
+
+	/**
+	 * Read EXIF orientation for an image path.
+	 *
+	 * @param string $path Source image path.
+	 * @return int
+	 */
+	private function get_exif_orientation( $path ) {
+		if ( ! is_string( $path ) || '' === $path ) {
+			return 1;
+		}
+
+		$type = @exif_imagetype( $path );
+		if ( IMAGETYPE_JPEG !== $type ) {
+			return 1;
+		}
+
+		$exif = @exif_read_data( $path );
+		if ( ! is_array( $exif ) || empty( $exif['Orientation'] ) ) {
+			return 1;
+		}
+
+		$orientation = (int) $exif['Orientation'];
+		if ( $orientation < 1 || $orientation > 8 ) {
+			return 1;
+		}
+
+		return $orientation;
+	}
+
+	/**
+	 * Apply EXIF orientation transforms to a GD image.
+	 *
+	 * @param resource|GdImage $image GD image resource.
+	 * @param int              $orientation EXIF orientation value.
+	 * @return resource|GdImage
+	 */
+	private function apply_exif_orientation_to_image( $image, $orientation ) {
+		$orientation = (int) $orientation;
+
+		switch ( $orientation ) {
+			case 2:
+				return $this->gd_flip( $image, IMG_FLIP_HORIZONTAL );
+			case 3:
+				return $this->gd_rotate( $image, 180 );
+			case 4:
+				return $this->gd_flip( $image, IMG_FLIP_VERTICAL );
+			case 5:
+				$flipped = $this->gd_flip( $image, IMG_FLIP_HORIZONTAL );
+				$rotated = $this->gd_rotate( $flipped, -90 );
+				if ( $rotated && $rotated !== $flipped ) {
+					imagedestroy( $flipped );
+				}
+				return $rotated;
+			case 6:
+				return $this->gd_rotate( $image, -90 );
+			case 7:
+				$flipped = $this->gd_flip( $image, IMG_FLIP_HORIZONTAL );
+				$rotated = $this->gd_rotate( $flipped, 90 );
+				if ( $rotated && $rotated !== $flipped ) {
+					imagedestroy( $flipped );
+				}
+				return $rotated;
+			case 8:
+				return $this->gd_rotate( $image, 90 );
+			default:
+				return $image;
+		}
+	}
+
+	private function apply_stored_rotation( $image, $rotation ) {
+		switch ( self::normalize_rotation_value( $rotation ) ) {
+			case 90:
+				return $this->gd_rotate( $image, -90 );
+			case 180:
+				return $this->gd_rotate( $image, 180 );
+			case 270:
+				return $this->gd_rotate( $image, 90 );
+			default:
+				return $image;
+		}
+	}
+
+	/**
+	 * Rotate a GD image and preserve transparency settings.
+	 *
+	 * @param resource|GdImage $image GD image resource.
+	 * @param int|float        $degrees Rotation angle.
+	 * @return resource|GdImage
+	 */
+	private function gd_rotate( $image, $degrees ) {
+		$rotated = imagerotate( $image, (float) $degrees, 0 );
+		if ( ! $rotated ) {
+			return $image;
+		}
+
+		return $rotated;
+	}
+
+	/**
+	 * Flip a GD image. Falls back to manual implementation when imageflip is unavailable.
+	 *
+	 * @param resource|GdImage $image GD image resource.
+	 * @param int              $mode Flip mode.
+	 * @return resource|GdImage
+	 */
+	private function gd_flip( $image, $mode ) {
+		if ( function_exists( 'imageflip' ) ) {
+			if ( imageflip( $image, $mode ) ) {
+				return $image;
+			}
+			return $image;
+		}
+
+		$width  = imagesx( $image );
+		$height = imagesy( $image );
+		if ( $width <= 0 || $height <= 0 ) {
+			return $image;
+		}
+
+		$flipped = imagecreatetruecolor( $width, $height );
+		if ( ! $flipped ) {
+			return $image;
+		}
+
+		if ( IMG_FLIP_HORIZONTAL === $mode ) {
+			imagecopyresampled( $flipped, $image, 0, 0, $width - 1, 0, $width, $height, -$width, $height );
+		} elseif ( IMG_FLIP_VERTICAL === $mode ) {
+			imagecopyresampled( $flipped, $image, 0, 0, 0, $height - 1, $width, $height, $width, -$height );
+		} else {
+			imagedestroy( $flipped );
+			return $image;
+		}
+
+		return $flipped;
 	}
 
 	private function draw_puzzle_grid_overlay_on_thumbnail( $thumb, $thumb_w, $thumb_h, $puzzle_cols, $puzzle_rows ) {
@@ -1194,24 +1470,17 @@ class WOI_Order_Images {
 		);
 	}
 
-	private function get_oriented_ratio_from_url( $url, $visible_width, $visible_height ) {
+	private function get_oriented_ratio_from_url( $url, $visible_width, $visible_height, $rotation = 0 ) {
 		$default_ratio = $visible_height > 0 ? $visible_width / $visible_height : 1;
 
 		if ( abs( $default_ratio - 1 ) < 0.0001 ) {
 			return 1;
 		}
 
-		$local_path = $this->url_to_upload_path( $url );
-		if ( ! $local_path || ! file_exists( $local_path ) ) {
+		$image_ratio = self::get_transformed_image_ratio_from_url( $url, $rotation );
+		if ( null === $image_ratio ) {
 			return $default_ratio;
 		}
-
-		$size = @getimagesize( $local_path );
-		if ( ! is_array( $size ) || empty( $size[0] ) || empty( $size[1] ) ) {
-			return $default_ratio;
-		}
-
-		$image_ratio      = (float) $size[0] / (float) $size[1];
 		$image_landscape  = $image_ratio >= 1;
 		$default_landscape = $default_ratio >= 1;
 
@@ -1311,6 +1580,42 @@ class WOI_Order_Images {
 
 		$path = $this->url_to_upload_path( $value );
 		return (bool) ( $path && file_exists( $path ) );
+	}
+
+	private function resolve_enabled_woi_product_id( $primary_product_id, $fallback_product_id = 0 ) {
+		$primary_product_id  = (int) $primary_product_id;
+		$fallback_product_id = (int) $fallback_product_id;
+
+		if ( $primary_product_id > 0 ) {
+			$enabled = get_post_meta( $primary_product_id, WOI_Admin_Product_Settings::META_ENABLED, true );
+			if ( 'yes' === $enabled ) {
+				return $primary_product_id;
+			}
+		}
+
+		if ( $fallback_product_id > 0 && $fallback_product_id !== $primary_product_id ) {
+			$enabled = get_post_meta( $fallback_product_id, WOI_Admin_Product_Settings::META_ENABLED, true );
+			if ( 'yes' === $enabled ) {
+				return $fallback_product_id;
+			}
+		}
+
+		return 0;
+	}
+
+	private function get_required_images_per_quantity_for_product( $product_id ) {
+		$product_id = (int) $product_id;
+		if ( $product_id <= 0 ) {
+			return 1;
+		}
+
+		$required_per_qty = max( 1, (int) get_post_meta( $product_id, WOI_Admin_Product_Settings::META_REQUIRED_COUNT, true ) );
+		$spec             = WOI_Admin_Product_Settings::get_product_spec( $product_id );
+		if ( ! empty( $spec['is_puzzle'] ) ) {
+			return 1;
+		}
+
+		return $required_per_qty;
 	}
 
 	private function is_woi_product( $product_id ) {
@@ -1449,18 +1754,14 @@ class WOI_Order_Images {
 		$missing_items = array();
 
 		foreach ( $order->get_items() as $item ) {
-			$product_id = $item->get_product_id();
-			if ( $product_id <= 0 ) {
+			$product_id   = (int) $item->get_product_id();
+			$variation_id = (int) $item->get_variation_id();
+			$woi_product_id = $this->resolve_enabled_woi_product_id( $variation_id, $product_id );
+			if ( $woi_product_id <= 0 ) {
 				continue;
 			}
 
-			$enabled = get_post_meta( $product_id, WOI_Admin_Product_Settings::META_ENABLED, true );
-			if ( 'yes' !== $enabled ) {
-				continue;
-			}
-
-			$required_per_qty = (int) get_post_meta( $product_id, WOI_Admin_Product_Settings::META_REQUIRED_COUNT, true );
-			$required_per_qty = max( 1, $required_per_qty );
+			$required_per_qty = $this->get_required_images_per_quantity_for_product( $woi_product_id );
 			$qty              = $item->get_quantity();
 			$required_total   = $required_per_qty * $qty;
 
@@ -1474,7 +1775,7 @@ class WOI_Order_Images {
 					'required' => $required_total,
 					'current'  => $current_images,
 					'qty'      => $qty,
-					'product_id' => $product_id,
+					'product_id' => $woi_product_id,
 				);
 			}
 		}

@@ -205,3 +205,85 @@
 	justify-content: flex-end;
 	gap: 8px;
 }
+
+/* Info modal */
+.woi-admin-info-modal[hidden] {
+	display: none;
+}
+
+.woi-admin-info-modal {
+	position: fixed;
+	inset: 0;
+	z-index: 999999;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.woi-admin-info-content {
+	position: relative;
+	z-index: 1;
+	width: min(520px, calc(100vw - 32px));
+	max-height: calc(100vh - 32px);
+	overflow: auto;
+	background: #fff;
+	border-radius: 8px;
+	padding: 14px;
+	box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
+}
+
+.woi-admin-info-loading {
+	margin: 12px 0;
+	color: #50575e;
+	font-style: italic;
+}
+
+.woi-admin-info-error {
+	margin: 12px 0;
+	color: #dc3232;
+}
+
+.woi-admin-info-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 13px;
+	margin: 8px 0 4px;
+}
+
+.woi-admin-info-table td {
+	padding: 5px 8px;
+	border-bottom: 1px solid #f0f0f0;
+	vertical-align: top;
+	line-height: 1.4;
+}
+
+.woi-admin-info-table td:first-child {
+	color: #50575e;
+	white-space: nowrap;
+	width: 44%;
+	font-weight: 500;
+}
+
+.woi-admin-info-table td:last-child {
+	word-break: break-all;
+}
+
+.woi-admin-info-section th {
+	padding: 10px 8px 4px;
+	text-align: left;
+	font-size: 11px;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: #2271b1;
+	border-bottom: 1px solid #2271b1;
+}
+
+.woi-admin-info-section:first-child th {
+	padding-top: 2px;
+}
+
+.woi-admin-dpi-excellent { color: #00a32a; font-weight: 600; }
+.woi-admin-dpi-good      { color: #4ab866; font-weight: 600; }
+.woi-admin-dpi-fair      { color: #dba617; font-weight: 600; }
+.woi-admin-dpi-low       { color: #dc3232; font-weight: 600; }

@@ -10,12 +10,13 @@
 	const modalTitle = modal.querySelector('[data-woi-admin-modal-title]');
 	const closeButtons = modal.querySelectorAll('[data-woi-admin-close]');
 	const saveButton = modal.querySelector('[data-woi-admin-save]');
+	const rotateButton = modal.querySelector('[data-woi-admin-rotate]');
 	const swapButton = modal.querySelector('[data-woi-admin-swap]');
 	const zoomSlider = modal.querySelector('[data-woi-admin-zoom-slider]');
 	const zoomValue = modal.querySelector('[data-woi-admin-zoom-value]');
 	const puzzleGrid = modal.querySelector('[data-woi-admin-puzzle-grid]');
 
-	if (!modalImage || !saveButton || !swapButton || !zoomSlider || !zoomValue || !puzzleGrid) {
+	if (!modalImage || !saveButton || !rotateButton || !swapButton || !zoomSlider || !zoomValue || !puzzleGrid) {
 		return;
 	}
 
@@ -38,6 +39,7 @@
 		currentPuzzleCols: 1,
 		currentPuzzleRows: 1,
 		currentOrientation: 'landscape',
+		currentRotation: 0,
 		currentCrop: null,
 		cropMinZoom: null,
 		cropMaxZoom: null,
@@ -53,7 +55,19 @@
 		}
 	};
 
+	// Info modal references
+	const infoModal = document.querySelector('[data-woi-admin-info-modal]');
+	const infoTitle = infoModal ? infoModal.querySelector('[data-woi-admin-info-title]') : null;
+	const infoLoadingEl = infoModal ? infoModal.querySelector('[data-woi-admin-info-loading]') : null;
+	const infoTableEl = infoModal ? infoModal.querySelector('[data-woi-admin-info-table]') : null;
+	const infoErrorEl = infoModal ? infoModal.querySelector('[data-woi-admin-info-error]') : null;
+
 	const normalizeOrientation = (orientation) => orientation === 'portrait' ? 'portrait' : 'landscape';
+
+	const normalizeRotation = (rotation) => {
+		const normalized = rotation % 360;
+		return normalized < 0 ? normalized + 360 : normalized;
+	};
 
 	const inferOrientationFromCrop = (crop, fallback) => {
 		if (crop && typeof crop === 'object') {
@@ -164,6 +178,41 @@
 		}
 	};
 
+	const applySavedCropViewport = (cropper) => {
+		if (!cropper || !state.currentCrop || state.currentCrop.width <= 0 || state.currentCrop.height <= 0) {
+			return false;
+		}
+
+		const cropBox = cropper.getCropBoxData();
+		if (!cropBox || cropBox.width <= 0 || cropBox.height <= 0) {
+			return false;
+		}
+
+		const cropWidth = parseFloat(state.currentCrop.width || 0);
+		const cropHeight = parseFloat(state.currentCrop.height || 0);
+		if (cropWidth <= 0 || cropHeight <= 0) {
+			return false;
+		}
+
+		// Rebuild the image viewport directly from the saved crop so reopening
+		// lands on the authoritative stored crop rather than a centered default.
+		const ratioX = cropBox.width / cropWidth;
+		const ratioY = cropBox.height / cropHeight;
+		const targetRatio = Math.min(ratioX, ratioY);
+
+		if (!(targetRatio > 0)) {
+			return false;
+		}
+
+		cropper.zoomTo(targetRatio);
+
+		const targetLeft = cropBox.left - (parseFloat(state.currentCrop.x || 0) * targetRatio);
+		const targetTop = cropBox.top - (parseFloat(state.currentCrop.y || 0) * targetRatio);
+		cropper.moveTo(targetLeft, targetTop);
+
+		return true;
+	};
+
 	const syncPuzzleGridToCropBox = () => {
 		if (!state.isPuzzle || !state.cropper) {
 			return;
@@ -232,6 +281,7 @@
 		puzzleGrid.style.top = '';
 		puzzleGrid.style.width = '';
 		puzzleGrid.style.height = '';
+		state.currentRotation = 0;
 	};
 
 	const openModal = () => {
@@ -301,6 +351,11 @@
 					return;
 				}
 
+				const effectiveRotation = normalizeRotation(state.currentRotation || 0);
+				if (effectiveRotation !== 0) {
+					cropper.rotateTo(effectiveRotation);
+				}
+
 				const containerData = cropper.getContainerData();
 				const cropW = containerData.width * (geometry.visibleWidthPercent / 100);
 				const cropH = containerData.height * (geometry.visibleHeightPercent / 100);
@@ -311,19 +366,12 @@
 					height: cropH,
 				});
 
-				if (state.currentCrop && state.currentCrop.width > 0 && state.currentCrop.height > 0) {
-					cropper.setData({
-						x: parseFloat(state.currentCrop.x || 0),
-						y: parseFloat(state.currentCrop.y || 0),
-						width: parseFloat(state.currentCrop.width || 0),
-						height: parseFloat(state.currentCrop.height || 0),
-					});
-				}
-
 				const applyZoomBounds = () => {
 					if (!state.cropper) {
 						return;
 					}
+
+					const hasSavedCrop = applySavedCropViewport(cropper);
 					const settledCropBox = cropper.getCropBoxData();
 					const effectiveCropW = settledCropBox && settledCropBox.width > 0 ? settledCropBox.width : cropW;
 					const effectiveCropH = settledCropBox && settledCropBox.height > 0 ? settledCropBox.height : cropH;
@@ -336,7 +384,7 @@
 					);
 					state.cropMaxZoom = currentRatio * 4;
 
-					if (state.cropMinZoom !== null && currentRatio > state.cropMinZoom) {
+					if (!hasSavedCrop && state.cropMinZoom !== null && currentRatio > state.cropMinZoom) {
 						cropper.zoomTo(state.cropMinZoom);
 					}
 
@@ -367,6 +415,7 @@
 		state.defaultPuzzleRows = Math.max(1, parseInt(button.getAttribute('data-puzzle-rows') || '1', 10));
 		state.currentPuzzleCols = Math.max(1, parseInt(button.getAttribute('data-current-puzzle-cols') || `${state.defaultPuzzleCols}`, 10));
 		state.currentPuzzleRows = Math.max(1, parseInt(button.getAttribute('data-current-puzzle-rows') || `${state.defaultPuzzleRows}`, 10));
+		state.currentRotation = normalizeRotation(parseInt(button.getAttribute('data-image-rotation') || '0', 10));
 		state.currentCrop = crop && typeof crop === 'object' ? crop : null;
 		if (state.isPuzzle) {
 			state.currentOrientation = normalizeOrientation(storedOrientation || (state.currentPuzzleCols >= state.currentPuzzleRows ? 'landscape' : 'portrait'));
@@ -379,13 +428,61 @@
 		}
 	};
 
+	const refreshStateFromServer = async (button) => {
+		if (!button) {
+			return;
+		}
+
+		const itemId = parseInt(button.getAttribute('data-item-id') || '0', 10);
+		const imageIndex = parseInt(button.getAttribute('data-image-index') || '-1', 10);
+		if (!itemId || imageIndex < 0) {
+			return;
+		}
+
+		const formData = new FormData();
+		formData.append('action', 'woi_admin_get_order_crop_state');
+		formData.append('nonce', config.stateNonce || '');
+		formData.append('item_id', `${itemId}`);
+		formData.append('image_index', `${imageIndex}`);
+
+		const response = await fetch(config.ajaxUrl, {
+			method: 'POST',
+			credentials: 'same-origin',
+			body: formData,
+		});
+		const result = await response.json().catch(() => ({}));
+
+		if (!response.ok || !result || result.success !== true || !result.data) {
+			throw new Error('load_failed');
+		}
+
+		const data = result.data;
+		if (data.imageUrl) {
+			button.setAttribute('data-image-url', data.imageUrl);
+		}
+		button.setAttribute('data-image-crop', JSON.stringify(data.crop || {}));
+		button.setAttribute('data-image-rotation', `${normalizeRotation(data.rotation || 0)}`);
+		if (typeof data.currentOrientation === 'string' && data.currentOrientation) {
+			button.setAttribute('data-current-orientation', data.currentOrientation);
+		}
+		if (typeof data.puzzleCols !== 'undefined') {
+			button.setAttribute('data-current-puzzle-cols', `${data.puzzleCols}`);
+		}
+		if (typeof data.puzzleRows !== 'undefined') {
+			button.setAttribute('data-current-puzzle-rows', `${data.puzzleRows}`);
+		}
+	};
+
 	const applySaveResponse = (result) => {
 		if (!state.activeButton) {
 			return;
 		}
 
-		const frame = state.activeButton.parentElement ? state.activeButton.parentElement.querySelector('[data-woi-admin-thumb-frame]') : null;
-		const image = state.activeButton.parentElement ? state.activeButton.parentElement.querySelector('[data-woi-admin-thumb-image]') : null;
+		const thumbRoot = state.activeButton.parentElement || state.activeButton;
+		const frame = thumbRoot ? thumbRoot.querySelector('[data-woi-admin-thumb-frame]') : null;
+		const image = thumbRoot
+			? (thumbRoot.querySelector('[data-woi-admin-thumb-image]') || thumbRoot.querySelector('.woi-admin-thumb-image'))
+			: null;
 		if (frame && result.visibleAspectRatio) {
 			frame.style.aspectRatio = `${result.visibleAspectRatio}`;
 		}
@@ -394,6 +491,7 @@
 		}
 
 		state.activeButton.setAttribute('data-image-crop', JSON.stringify(result.crop || {}));
+		state.activeButton.setAttribute('data-image-rotation', `${normalizeRotation(result.rotation || 0)}`);
 		if (result.currentOrientation) {
 			state.activeButton.setAttribute('data-current-orientation', result.currentOrientation);
 		}
@@ -403,6 +501,136 @@
 		if (typeof result.puzzleRows !== 'undefined') {
 			state.activeButton.setAttribute('data-current-puzzle-rows', `${result.puzzleRows}`);
 		}
+	};
+
+	const formatFileSize = (bytes) => {
+		if (bytes === null || bytes === undefined) return '—';
+		if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`;
+		if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+		return `${bytes} B`;
+	};
+
+	const fillInfoField = (key, value) => {
+		const el = infoTableEl ? infoTableEl.querySelector(`[data-woi-info="${key}"]`) : null;
+		if (el) el.textContent = (value !== null && value !== undefined && value !== '') ? value : '—';
+	};
+
+	const setInfoRowVisibility = (key, visible) => {
+		const el = infoTableEl ? infoTableEl.querySelector(`[data-woi-info="${key}"]`) : null;
+		const row = el ? el.closest('tr') : null;
+		if (row) {
+			row.hidden = !visible;
+		}
+	};
+
+	const fillInfoFieldWithLink = (key, label, href) => {
+		const el = infoTableEl ? infoTableEl.querySelector(`[data-woi-info="${key}"]`) : null;
+		if (!el) {
+			return;
+		}
+
+		el.textContent = '';
+		if (!label || !href) {
+			el.textContent = '—';
+			return;
+		}
+
+		const link = document.createElement('a');
+		link.href = href;
+		link.target = '_blank';
+		link.rel = 'noopener noreferrer';
+		link.textContent = label;
+		el.appendChild(link);
+	};
+
+	const openInfoModal = (trigger) => {
+		if (!infoModal) return;
+
+		const imageLabel = trigger.getAttribute('data-image-label') || 'Image';
+		if (infoTitle) infoTitle.textContent = `${imageLabel} — Info`;
+
+		if (infoLoadingEl) infoLoadingEl.hidden = false;
+		if (infoTableEl) infoTableEl.hidden = true;
+		if (infoErrorEl) { infoErrorEl.hidden = true; infoErrorEl.textContent = ''; }
+
+		infoModal.hidden = false;
+
+		const formData = new FormData();
+		formData.append('action', 'woi_admin_image_info');
+		formData.append('nonce', config.infoNonce || '');
+		formData.append('item_id', trigger.getAttribute('data-item-id') || '0');
+		formData.append('image_index', trigger.getAttribute('data-image-index') || '0');
+
+		fetch(config.ajaxUrl, { method: 'POST', credentials: 'same-origin', body: formData })
+			.then((r) => r.json())
+			.then((result) => {
+				if (!result || !result.success) {
+					throw new Error((result && result.data && result.data.message) || 'Failed to load image info');
+				}
+				const d = result.data;
+
+				fillInfoFieldWithLink('filename', d.filename, d.image_url);
+				fillInfoField('file_size', d.file_size !== null ? formatFileSize(d.file_size) : null);
+				fillInfoField('file_modified', d.file_modified);
+				fillInfoField('raw_dims', (d.raw_width && d.raw_height) ? `${d.raw_width} × ${d.raw_height} px` : null);
+
+				fillInfoField('exif_orientation', `${d.exif_orientation} — ${d.exif_desc}`);
+				setInfoRowVisibility('exif_date', !!d.exif_date);
+				fillInfoField('exif_date', d.exif_date);
+				if (d.gps_lat !== null && d.gps_lat !== undefined && d.gps_lng !== null && d.gps_lng !== undefined) {
+					const lat = Number(d.gps_lat).toFixed(6);
+					const lng = Number(d.gps_lng).toFixed(6);
+					setInfoRowVisibility('gps_location', true);
+					fillInfoFieldWithLink('gps_location', `${lat}, ${lng}`, `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lng}`)}`);
+				} else {
+					setInfoRowVisibility('gps_location', false);
+					fillInfoField('gps_location', null);
+				}
+				fillInfoField('woi_rotation', d.woi_rotation ? `${d.woi_rotation}°` : '0° (none)');
+				const rawDimsLabel = (d.raw_width && d.raw_height) ? `${d.raw_width} × ${d.raw_height} px` : null;
+				const effDimsLabel = (d.eff_width && d.eff_height) ? `${d.eff_width} × ${d.eff_height} px` : null;
+				const showEffDims = !!effDimsLabel && effDimsLabel !== rawDimsLabel;
+				setInfoRowVisibility('eff_dims', showEffDims);
+				fillInfoField('eff_dims', showEffDims ? effDimsLabel : null);
+
+				const cx = d.crop_x !== null ? Math.round(d.crop_x) : null;
+				const cy = d.crop_y !== null ? Math.round(d.crop_y) : null;
+				fillInfoField('crop_origin', (cx !== null && cy !== null) ? `${cx}, ${cy}` : null);
+				fillInfoField('crop_size', (d.crop_w && d.crop_h) ? `${Math.round(d.crop_w)} × ${Math.round(d.crop_h)} px` : null);
+				fillInfoField('crop_aspect', d.crop_aspect ? `${d.crop_aspect} : 1` : null);
+
+				const visLabel = (d.product_vis_w && d.product_vis_h)
+					? `${d.product_vis_w}" × ${d.product_vis_h}"` : null;
+				fillInfoField('product_vis', visLabel);
+				const fullLabel = (d.product_full_w && d.product_full_h)
+					? `${d.product_full_w}" × ${d.product_full_h}"${d.wrap_margin ? ` (${d.wrap_margin}" bleed each side)` : ''}` : null;
+				fillInfoField('product_full', fullLabel);
+				fillInfoField('product_aspect', d.product_aspect ? `${d.product_aspect} : 1` : null);
+
+				const dpiEl = infoTableEl ? infoTableEl.querySelector('[data-woi-info="print_dpi"]') : null;
+				if (dpiEl) {
+					if (d.print_dpi !== null && d.dpi_quality) {
+						const qualityLabels = { excellent: 'Excellent', good: 'Good', fair: 'Fair', low: 'Low — consider a higher resolution photo' };
+						dpiEl.textContent = '';
+						const dpiSpan = document.createElement('span');
+						dpiSpan.className = `woi-admin-dpi-${d.dpi_quality}`;
+						dpiSpan.textContent = `${d.print_dpi} DPI — ${qualityLabels[d.dpi_quality] || d.dpi_quality}`;
+						dpiEl.appendChild(dpiSpan);
+					} else {
+						dpiEl.textContent = '—';
+					}
+				}
+
+				if (infoLoadingEl) infoLoadingEl.hidden = true;
+				if (infoTableEl) infoTableEl.hidden = false;
+			})
+			.catch((err) => {
+				if (infoLoadingEl) infoLoadingEl.hidden = true;
+				if (infoErrorEl) {
+					infoErrorEl.textContent = (err && err.message) ? err.message : 'Failed to load image info.';
+					infoErrorEl.hidden = false;
+				}
+			});
 	};
 
 	const createMenuElement = () => {
@@ -423,10 +651,17 @@
 		editButton.setAttribute('role', 'menuitem');
 		editButton.textContent = config.editLabel || 'Adjust Crop';
 
+		const infoButton = document.createElement('button');
+		infoButton.type = 'button';
+		infoButton.className = 'woi-admin-image-menu-item';
+		infoButton.setAttribute('role', 'menuitem');
+		infoButton.textContent = config.infoLabel || 'Show Info';
+
 		menu.appendChild(viewButton);
 		menu.appendChild(editButton);
+		menu.appendChild(infoButton);
 
-		return { menu, viewButton, editButton };
+		return { menu, viewButton, editButton, infoButton };
 	};
 
 	const closeAllMenus = () => {
@@ -440,7 +675,7 @@
 	const openMenu = (trigger) => {
 		closeAllMenus();
 
-		const { menu, viewButton, editButton } = createMenuElement();
+		const { menu, viewButton, editButton, infoButton } = createMenuElement();
 		const imageUrl = trigger.getAttribute('data-image-url');
 
 		viewButton.addEventListener('click', () => {
@@ -449,9 +684,22 @@
 		});
 
 		editButton.addEventListener('click', () => {
-			hydrateStateFromButton(trigger);
-			openModal();
+			refreshStateFromServer(trigger)
+				.then(() => {
+					hydrateStateFromButton(trigger);
+					openModal();
+				})
+				.catch(() => {
+					window.alert(config.loadFailed || 'Unable to load the latest saved crop right now.');
+				})
+				.finally(() => {
+					closeAllMenus();
+				});
+		});
+
+		infoButton.addEventListener('click', () => {
 			closeAllMenus();
+			openInfoModal(trigger);
 		});
 
 		document.body.appendChild(menu);
@@ -537,6 +785,16 @@
 		zoomValue.textContent = `${Math.round(targetRatio * 100)}%`;
 	});
 
+	rotateButton.addEventListener('click', () => {
+		if (state.imageIndex < 0) {
+			return;
+		}
+
+		state.currentRotation = normalizeRotation((state.currentRotation || 0) + 90);
+		state.currentCrop = null;
+		openModal();
+	});
+
 	saveButton.addEventListener('click', () => {
 		if (!state.cropper || !state.itemId || state.imageIndex < 0) {
 			return;
@@ -552,6 +810,7 @@
 		formData.append('crop[y]', `${cropData.y}`);
 		formData.append('crop[width]', `${cropData.width}`);
 		formData.append('crop[height]', `${cropData.height}`);
+		formData.append('rotation', `${normalizeRotation(state.currentRotation || 0)}`);
 		if (state.isPuzzle) {
 			formData.append('puzzle_cols', `${state.currentPuzzleCols}`);
 			formData.append('puzzle_rows', `${state.currentPuzzleRows}`);
@@ -583,4 +842,19 @@
 	closeButtons.forEach((button) => {
 		button.addEventListener('click', closeModal);
 	});
+
+	// Info modal close handlers
+	if (infoModal) {
+		infoModal.querySelectorAll('[data-woi-admin-info-close]').forEach((btn) => {
+			btn.addEventListener('click', () => {
+				infoModal.hidden = true;
+			});
+		});
+
+		document.addEventListener('keydown', (event) => {
+			if (event.key === 'Escape' && !infoModal.hidden) {
+				infoModal.hidden = true;
+			}
+		});
+	}
 })();
