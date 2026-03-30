@@ -16,6 +16,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
 
       - name: PHP Lint
         run: find . -name "*.php" -type f -exec php -l {} \;
@@ -52,6 +55,14 @@ jobs:
             exit 1
           fi
 
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            tag_version="${GITHUB_REF#refs/tags/v}"
+            if [[ "$tag_version" != "$plugin_version" ]]; then
+              echo "Tag version ($tag_version) does not match plugin version ($plugin_version)."
+              exit 1
+            fi
+          fi
+
   create-release:
     if: startsWith(github.ref, 'refs/tags/')
     needs: lint
@@ -60,6 +71,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
 
       - name: Get version from tag
         id: tag_version

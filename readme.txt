@@ -4,7 +4,7 @@ Tags: woocommerce, product images, image upload, printing, puzzle
 Requires at least: 6.8
 Tested up to: 6.9.4
 Requires PHP: 7.4
-Stable tag: 0.7.3
+Stable tag: 0.7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -69,6 +69,10 @@ This plugin bundles the following third-party library:
   * https://github.com/YahnisElsts/plugin-update-checker
 
 == Changelog ==
+
+= 0.7.4 =
+* Fixed the GitHub release workflow to build from the exact pushed ref and to fail if a pushed tag version does not match the plugin version in the checked-out files.
+* Released the shared thumbnail-resolution and customer DPI warning improvements in a correctly versioned package.
 
 = 0.7.3 =
 * Unified cart, order-history, and admin thumbnail resolution so all three views use the same shared crop/orientation/puzzle-grid logic.

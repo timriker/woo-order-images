@@ -4,6 +4,15 @@ All notable changes to `woo-order-images` will be documented in this file.
 
 This project follows a pragmatic release history rather than a strict changelog format for older versions. Recent releases are documented in more detail.
 
+## [0.7.4] - 2026-03-29
+
+### Fixed
+- Fixed the GitHub release workflow to check out the exact pushed ref when linting and packaging release builds.
+- Added a tag-versus-plugin-version validation step so stale or mispointed tags fail before publishing a release asset.
+
+### Changed
+- Published the shared thumbnail-resolution and customer DPI warning improvements in a correctly versioned release package.
+
 ## [0.7.3] - 2026-03-29
 
 ### Changed
