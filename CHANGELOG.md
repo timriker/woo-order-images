@@ -4,6 +4,15 @@ All notable changes to `woo-order-images` will be documented in this file.
 
 This project follows a pragmatic release history rather than a strict changelog format for older versions. Recent releases are documented in more detail.
 
+## [0.7.3] - 2026-03-29
+
+### Changed
+- Unified cart, order-history, and admin thumbnail resolution so all three views now use the same shared crop, orientation, and puzzle-grid logic.
+- Added a customer-facing DPI warning in the crop modal with concise print-quality messaging.
+
+### Fixed
+- Fixed customer crop-dialog initialization so the crop modal and slot UI load correctly after the recent rotation work.
+
 ## [0.7.2] - 2026-03-28
 
 ### Changed

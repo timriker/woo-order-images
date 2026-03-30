@@ -59,8 +59,17 @@ class WOI_Frontend {
 			'woi-frontend',
 			'woiFrontend',
 			array(
-				'ajaxUrl' => admin_url( 'admin-ajax.php' ),
-				'nonce'   => wp_create_nonce( 'woi_stage_image_upload' ),
+				'ajaxUrl'            => admin_url( 'admin-ajax.php' ),
+				'nonce'              => wp_create_nonce( 'woi_stage_image_upload' ),
+				'dpiExcellentLabel'  => __( 'Excellent', 'woo-order-images' ),
+				'dpiGoodLabel'       => __( 'Good', 'woo-order-images' ),
+				'dpiFairLabel'       => __( 'Fair', 'woo-order-images' ),
+				'dpiLowLabel'        => __( 'Low', 'woo-order-images' ),
+				'dpiWarningTemplate' => __( 'Print quality: %1$s (%2$d DPI). %3$s', 'woo-order-images' ),
+				'dpiLowHelp'         => __( 'May print blurry.', 'woo-order-images' ),
+				'dpiFairHelp'        => __( 'Acceptable, but not ideal.', 'woo-order-images' ),
+				'dpiGoodHelp'        => __( 'Should print well.', 'woo-order-images' ),
+				'dpiExcellentHelp'   => __( 'Should print very well.', 'woo-order-images' ),
 			)
 		);
 	}
@@ -126,6 +135,8 @@ class WOI_Frontend {
 			data-woi-required-base="<?php echo esc_attr( $required ); ?>"
 			data-woi-aspect-ratio="<?php echo esc_attr( $spec['full_aspect_ratio'] ); ?>"
 			data-woi-visible-aspect-ratio="<?php echo esc_attr( $spec['visible_aspect_ratio'] ); ?>"
+			data-woi-visible-width="<?php echo esc_attr( $spec['visible_width'] ); ?>"
+			data-woi-visible-height="<?php echo esc_attr( $spec['visible_height'] ); ?>"
 			data-woi-visible-width-percent="<?php echo esc_attr( $spec['visible_width_percent'] ); ?>"
 			data-woi-visible-height-percent="<?php echo esc_attr( $spec['visible_height_percent'] ); ?>"
 			data-woi-is-puzzle="<?php echo ! empty( $spec['is_puzzle'] ) ? '1' : '0'; ?>"
@@ -230,6 +241,7 @@ class WOI_Frontend {
 					<input type="range" class="woi-zoom-slider" data-woi-zoom-slider min="0" max="100" value="50" step="1" aria-label="<?php esc_attr_e( 'Zoom', 'woo-order-images' ); ?>">
 					<span class="woi-zoom-value" data-woi-zoom-value>100%</span>
 				</div>
+				<p class="woi-dpi-warning" data-woi-dpi-warning hidden></p>
 				<div class="woi-apply-count-row" data-woi-apply-count-row hidden>
 					<label class="woi-apply-count-label" for="woi-apply-count-<?php echo esc_attr( $product->get_id() ); ?>"><?php esc_html_e( 'Use this image for', 'woo-order-images' ); ?></label>
 					<select

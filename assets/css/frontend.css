@@ -309,6 +309,34 @@
 	padding: 0 2px;
 }
 
+.woi-dpi-warning {
+	margin: 8px 2px 2px;
+	padding: 8px 10px;
+	border-radius: 4px;
+	font-size: 13px;
+	line-height: 1.45;
+}
+
+.woi-dpi-warning--excellent {
+	background: #ecf7ed;
+	color: #1e5c2b;
+}
+
+.woi-dpi-warning--good {
+	background: #eef6ff;
+	color: #124a7a;
+}
+
+.woi-dpi-warning--fair {
+	background: #fff7e6;
+	color: #8a5a00;
+}
+
+.woi-dpi-warning--low {
+	background: #fff1f0;
+	color: #9a271a;
+}
+
 .woi-apply-count-label,
 .woi-apply-count-suffix {
 	font-size: 13px;

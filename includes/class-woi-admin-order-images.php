@@ -196,13 +196,17 @@ class WOI_Admin_Order_Images {
 				'puzzle_rows' => isset( $entry['puzzle_rows'] ) ? max( 0, (int) $entry['puzzle_rows'] ) : 0,
 				'rotation'    => $rotation,
 			);
-			$grid        = $this->resolve_puzzle_grid_for_entry( $base_spec, $url, $crop, $image_entry );
-			$spec        = ! empty( $base_spec['is_puzzle'] ) ? $base_spec : $this->get_oriented_spec_for_crop( $base_spec, $url, $crop, $rotation );
-			$frame_ratio = $this->get_thumbnail_frame_aspect_ratio( $spec, $grid, ! empty( $base_spec['is_puzzle'] ) );
+			$context     = WOI_Order_Images::resolve_thumbnail_context(
+				$image_entry,
+				$base_spec['visible_width'],
+				$base_spec['visible_height'],
+				! empty( $base_spec['is_puzzle'] ),
+				(int) $base_spec['puzzle_cols'],
+				(int) $base_spec['puzzle_rows']
+			);
 			$index_label = sprintf( __( 'Image %d', 'woo-order-images' ), ( $index + 1 ) );
 
-			// Use unified helper method to render thumbnail with grid
-			$thumbnail_html = WOI_Order_Images::render_thumbnail_html_static( $url, $crop, (int) $grid['cols'], (int) $grid['rows'], $spec['visible_width'], $spec['visible_height'], 72, 'woi-admin', $rotation );
+			$thumbnail_html = WOI_Order_Images::render_thumbnail_html_static( $url, $crop, (int) $context['puzzle_cols'], (int) $context['puzzle_rows'], $context['visible_width'], $context['visible_height'], 72, 'woi-admin', $rotation );
 
 			echo '<span class="woi-admin-image-thumb">';
 			echo '<button type="button" class="woi-admin-image-menu-trigger" data-woi-admin-image-menu-trigger'
@@ -212,7 +216,7 @@ class WOI_Admin_Order_Images {
 				. ' data-image-label="' . esc_attr( $index_label ) . '"'
 				. ' data-image-crop="' . esc_attr( wp_json_encode( $crop ) ) . '"'
 				. ' data-image-rotation="' . esc_attr( $rotation ) . '"'
-				. ' data-current-orientation="' . esc_attr( $this->get_entry_orientation( $base_spec, $crop, $grid ) ) . '"'
+				. ' data-current-orientation="' . esc_attr( $context['orientation'] ) . '"'
 				. ' data-visible-width="' . esc_attr( $base_spec['visible_width'] ) . '"'
 				. ' data-visible-height="' . esc_attr( $base_spec['visible_height'] ) . '"'
 				. ' data-visible-width-percent="' . esc_attr( $base_spec['visible_width_percent'] ) . '"'
@@ -221,11 +225,11 @@ class WOI_Admin_Order_Images {
 				. ' data-is-puzzle="' . ( ! empty( $base_spec['is_puzzle'] ) ? '1' : '0' ) . '"'
 				. ' data-puzzle-cols="' . esc_attr( (int) $base_spec['puzzle_cols'] ) . '"'
 				. ' data-puzzle-rows="' . esc_attr( (int) $base_spec['puzzle_rows'] ) . '"'
-				. ' data-current-puzzle-cols="' . esc_attr( (int) $grid['cols'] ) . '"'
-				. ' data-current-puzzle-rows="' . esc_attr( (int) $grid['rows'] ) . '"'
+				. ' data-current-puzzle-cols="' . esc_attr( (int) $context['puzzle_cols'] ) . '"'
+				. ' data-current-puzzle-rows="' . esc_attr( (int) $context['puzzle_rows'] ) . '"'
 				. ' title="' . esc_attr( $index_label ) . '"'
 				. ' aria-label="' . esc_attr( sprintf( __( '%s - click for options', 'woo-order-images' ), $index_label ) ) . '">'
-				. '<span class="woi-admin-image-frame" data-woi-admin-thumb-frame style="display:block;aspect-ratio:' . esc_attr( $frame_ratio ) . ';overflow:hidden;border:1px solid #ccd0d4;border-radius:4px;background:#f6f7f7;position:relative;">'
+				. '<span class="woi-admin-image-frame" data-woi-admin-thumb-frame style="display:block;aspect-ratio:' . esc_attr( $context['frame_ratio'] ) . ';overflow:hidden;border:1px solid #ccd0d4;border-radius:4px;background:#f6f7f7;position:relative;">'
 				. $thumbnail_html
 				. '</span>'
 				. '</button>';
@@ -369,10 +373,15 @@ class WOI_Admin_Order_Images {
 		$entry      = $images[ $image_index ];
 		$url        = (string) $entry['url'];
 		$rotation   = isset( $entry['rotation'] ) ? WOI_Order_Images::normalize_rotation_value( $entry['rotation'] ) : 0;
-		$grid       = $this->resolve_puzzle_grid_for_entry( $base_spec, $url, $crop, $entry );
-		$thumb_src  = WOI_Order_Images::build_thumbnail_image_url( $url, $crop, 240, (int) $grid['cols'], (int) $grid['rows'], $rotation );
-		$thumb_spec = ! empty( $base_spec['is_puzzle'] ) ? $base_spec : $this->get_oriented_spec_for_crop( $base_spec, $url, $crop, $rotation );
-		$frame_ratio = $this->get_thumbnail_frame_aspect_ratio( $thumb_spec, $grid, ! empty( $base_spec['is_puzzle'] ) );
+		$context    = WOI_Order_Images::resolve_thumbnail_context(
+			$entry,
+			$base_spec['visible_width'],
+			$base_spec['visible_height'],
+			! empty( $base_spec['is_puzzle'] ),
+			(int) $base_spec['puzzle_cols'],
+			(int) $base_spec['puzzle_rows']
+		);
+		$thumb_src  = WOI_Order_Images::build_thumbnail_image_url( $url, $crop, 240, (int) $context['puzzle_cols'], (int) $context['puzzle_rows'], $rotation );
 
 		if ( '' === $thumb_src ) {
 			$thumb_src = $url;
@@ -383,10 +392,10 @@ class WOI_Admin_Order_Images {
 				'crop'                 => $crop,
 				'rotation'             => $rotation,
 				'thumbSrc'             => $thumb_src,
-				'visibleAspectRatio'   => $frame_ratio,
-				'puzzleCols'           => (int) $grid['cols'],
-				'puzzleRows'           => (int) $grid['rows'],
-				'currentOrientation'   => $this->get_entry_orientation( $base_spec, $crop, $grid ),
+				'visibleAspectRatio'   => $context['frame_ratio'],
+				'puzzleCols'           => (int) $context['puzzle_cols'],
+				'puzzleRows'           => (int) $context['puzzle_rows'],
+				'currentOrientation'   => $context['orientation'],
 			)
 		);
 	}
@@ -431,16 +440,23 @@ class WOI_Admin_Order_Images {
 		$crop      = isset( $entry['crop'] ) && is_array( $entry['crop'] ) ? $entry['crop'] : array();
 		$rotation  = isset( $entry['rotation'] ) ? WOI_Order_Images::normalize_rotation_value( $entry['rotation'] ) : 0;
 		$base_spec = $this->get_item_spec( $item );
-		$grid      = $this->resolve_puzzle_grid_for_entry( $base_spec, $url, $crop, $entry );
+		$context   = WOI_Order_Images::resolve_thumbnail_context(
+			$entry,
+			$base_spec['visible_width'],
+			$base_spec['visible_height'],
+			! empty( $base_spec['is_puzzle'] ),
+			(int) $base_spec['puzzle_cols'],
+			(int) $base_spec['puzzle_rows']
+		);
 
 		wp_send_json_success(
 			array(
 				'imageUrl'           => $url,
 				'crop'               => $crop,
 				'rotation'           => $rotation,
-				'currentOrientation' => $this->get_entry_orientation( $base_spec, $crop, $grid ),
-				'puzzleCols'         => (int) $grid['cols'],
-				'puzzleRows'         => (int) $grid['rows'],
+				'currentOrientation' => $context['orientation'],
+				'puzzleCols'         => (int) $context['puzzle_cols'],
+				'puzzleRows'         => (int) $context['puzzle_rows'],
 			)
 		);
 	}
@@ -486,9 +502,15 @@ class WOI_Admin_Order_Images {
 			if ( '' === $url ) {
 				continue;
 			}
-			$grid        = $this->resolve_puzzle_grid_for_entry( $base_spec, $url, $crop, $entry );
-			$spec        = ! empty( $base_spec['is_puzzle'] ) ? $base_spec : $this->get_oriented_spec_for_crop( $base_spec, $url, $crop, $rotation );
-			$thumbnail_html = WOI_Order_Images::render_thumbnail_html_static( $url, $crop, (int) $grid['cols'], (int) $grid['rows'], $spec['visible_width'], $spec['visible_height'], 68, 'woi-history', $rotation );
+			$context     = WOI_Order_Images::resolve_thumbnail_context(
+				$entry,
+				$base_spec['visible_width'],
+				$base_spec['visible_height'],
+				! empty( $base_spec['is_puzzle'] ),
+				(int) $base_spec['puzzle_cols'],
+				(int) $base_spec['puzzle_rows']
+			);
+			$thumbnail_html = WOI_Order_Images::render_thumbnail_html_static( $url, $crop, (int) $context['puzzle_cols'], (int) $context['puzzle_rows'], $context['visible_width'], $context['visible_height'], 68, 'woi-history', $rotation );
 			$index_label = sprintf( __( 'Image %d', 'woo-order-images' ), ( $index + 1 ) );
 			echo '<a href="' . esc_url( $url ) . '" target="_blank" rel="noopener noreferrer" title="' . esc_attr( $index_label ) . '">';
 			echo '<span style="display:block;line-height:0;position:relative;overflow:hidden;border:1px solid #ccd0d4;border-radius:4px;background:#f6f7f7;">';

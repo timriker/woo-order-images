@@ -4,7 +4,7 @@ Tags: woocommerce, product images, image upload, printing, puzzle
 Requires at least: 6.8
 Tested up to: 6.9.4
 Requires PHP: 7.4
-Stable tag: 0.7.2
+Stable tag: 0.7.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -69,6 +69,11 @@ This plugin bundles the following third-party library:
   * https://github.com/YahnisElsts/plugin-update-checker
 
 == Changelog ==
+
+= 0.7.3 =
+* Unified cart, order-history, and admin thumbnail resolution so all three views use the same shared crop/orientation/puzzle-grid logic.
+* Added a customer-facing DPI warning in the crop modal with simpler print-quality messaging.
+* Fixed customer crop-dialog initialization so the modal and slot UI load correctly again after the recent rotation work.
 
 = 0.7.2 =
 * Redesigned admin order image interaction: replaced hover-reveal edit button with click-activated popup menu offering "View Image" and "Adjust Crop" options.

@@ -727,23 +727,11 @@ class WOI_Order_Images {
 		$visible_width  = isset( $cart_item[ self::CART_VISIBLE_WIDTH_KEY ] ) ? (float) $cart_item[ self::CART_VISIBLE_WIDTH_KEY ] : 1;
 		$visible_height = isset( $cart_item[ self::CART_VISIBLE_HEIGHT_KEY ] ) ? (float) $cart_item[ self::CART_VISIBLE_HEIGHT_KEY ] : 1;
 
-		// For puzzle products, ensure each image has puzzle dimensions attached
 		$is_puzzle = isset( $cart_item[ self::CART_IS_PUZZLE_KEY ] ) && 'yes' === $cart_item[ self::CART_IS_PUZZLE_KEY ];
-		if ( $is_puzzle ) {
-			$puzzle_cols = isset( $cart_item[ self::CART_PUZZLE_COLS_KEY ] ) ? max( 1, (int) $cart_item[ self::CART_PUZZLE_COLS_KEY ] ) : 1;
-			$puzzle_rows = isset( $cart_item[ self::CART_PUZZLE_ROWS_KEY ] ) ? max( 1, (int) $cart_item[ self::CART_PUZZLE_ROWS_KEY ] ) : 1;
-			foreach ( $images as &$image ) {
-				if ( ! isset( $image['puzzle_cols'] ) || 0 === (int) $image['puzzle_cols'] ) {
-					$image['puzzle_cols'] = $puzzle_cols;
-				}
-				if ( ! isset( $image['puzzle_rows'] ) || 0 === (int) $image['puzzle_rows'] ) {
-					$image['puzzle_rows'] = $puzzle_rows;
-				}
-			}
-			unset( $image );
-		}
+		$puzzle_cols = $is_puzzle && isset( $cart_item[ self::CART_PUZZLE_COLS_KEY ] ) ? max( 1, (int) $cart_item[ self::CART_PUZZLE_COLS_KEY ] ) : 0;
+		$puzzle_rows = $is_puzzle && isset( $cart_item[ self::CART_PUZZLE_ROWS_KEY ] ) ? max( 1, (int) $cart_item[ self::CART_PUZZLE_ROWS_KEY ] ) : 0;
 
-		$thumbs_markup  = $this->get_thumbnail_markup( $images, $visible_width, $visible_height, 56 );
+		$thumbs_markup  = $this->get_thumbnail_markup( $images, $visible_width, $visible_height, 56, $is_puzzle, $puzzle_cols, $puzzle_rows );
 		if ( '' === $thumbs_markup ) {
 			return;
 		}
@@ -866,7 +854,7 @@ class WOI_Order_Images {
 		}
 	}
 
-	public function get_thumbnail_markup( $images, $visible_width, $visible_height, $size = 64 ) {
+	public function get_thumbnail_markup( $images, $visible_width, $visible_height, $size = 64, $is_puzzle = false, $default_puzzle_cols = 0, $default_puzzle_rows = 0 ) {
 		$image_entries = array();
 		foreach ( (array) $images as $image ) {
 			if ( is_array( $image ) && ! empty( $image['url'] ) ) {
@@ -902,10 +890,18 @@ class WOI_Order_Images {
 				continue;
 			}
 
-			$puzzle_cols = isset( $entry['puzzle_cols'] ) ? max( 0, (int) $entry['puzzle_cols'] ) : 0;
-			$puzzle_rows = isset( $entry['puzzle_rows'] ) ? max( 0, (int) $entry['puzzle_rows'] ) : 0;
-
-			$thumbnail_inner = $this->render_thumbnail_html( $url, $crop, $puzzle_cols, $puzzle_rows, $visible_width, $visible_height, 56, 'woi-inline', $rotation );
+			$context = self::resolve_thumbnail_context( $entry, $visible_width, $visible_height, $is_puzzle, $default_puzzle_cols, $default_puzzle_rows );
+			$thumbnail_inner = $this->render_thumbnail_html(
+				$url,
+				$crop,
+				(int) $context['puzzle_cols'],
+				(int) $context['puzzle_rows'],
+				(float) $context['visible_width'],
+				(float) $context['visible_height'],
+				56,
+				'woi-inline',
+				$rotation
+			);
 			if ( '' !== $thumbnail_inner ) {
 				$html .= '<span class="woi-inline-thumb-link" style="display:inline-block;line-height:0;position:relative;">';
 				$html .= '<a href="' . esc_url( $url ) . '" target="_blank" rel="noopener noreferrer" style="display:block;line-height:0;">';
@@ -1076,6 +1072,194 @@ class WOI_Order_Images {
 	public static function render_thumbnail_html_static( $url, $crop, $puzzle_cols, $puzzle_rows, $visible_width, $visible_height, $base_size = 72, $class_prefix = 'woi-inline', $rotation = 0 ) {
 		$instance = new self();
 		return $instance->render_thumbnail_html( $url, $crop, $puzzle_cols, $puzzle_rows, $visible_width, $visible_height, $base_size, $class_prefix, $rotation );
+	}
+
+	public static function resolve_thumbnail_context( $entry, $visible_width, $visible_height, $is_puzzle = false, $default_puzzle_cols = 0, $default_puzzle_rows = 0 ) {
+		$entry = is_array( $entry ) ? $entry : array();
+		$spec  = self::build_thumbnail_spec( $visible_width, $visible_height, $is_puzzle, $default_puzzle_cols, $default_puzzle_rows );
+		$url   = isset( $entry['url'] ) ? (string) $entry['url'] : '';
+		$crop  = isset( $entry['crop'] ) && is_array( $entry['crop'] ) ? $entry['crop'] : array();
+		$rotation = isset( $entry['rotation'] ) ? self::normalize_rotation_value( $entry['rotation'] ) : 0;
+
+		$grid = self::resolve_puzzle_grid_for_thumbnail( $spec, $crop, $url, $rotation, $entry );
+
+		if ( ! empty( $spec['is_puzzle'] ) ) {
+			$resolved_spec = $spec;
+		} else {
+			$resolved_spec = self::get_oriented_spec_for_thumbnail( $spec, $url, $crop, $rotation );
+		}
+
+		return array(
+			'visible_width'       => (float) $resolved_spec['visible_width'],
+			'visible_height'      => (float) $resolved_spec['visible_height'],
+			'visible_aspect_ratio'=> (float) $resolved_spec['visible_aspect_ratio'],
+			'puzzle_cols'         => (int) $grid['cols'],
+			'puzzle_rows'         => (int) $grid['rows'],
+			'frame_ratio'         => self::get_thumbnail_frame_aspect_ratio_static( $resolved_spec, $grid, ! empty( $spec['is_puzzle'] ) ),
+			'orientation'         => self::get_entry_orientation_static( $resolved_spec, $crop, $grid ),
+		);
+	}
+
+	private static function build_thumbnail_spec( $visible_width, $visible_height, $is_puzzle = false, $default_puzzle_cols = 0, $default_puzzle_rows = 0 ) {
+		$visible_width  = max( 0.0001, (float) $visible_width );
+		$visible_height = max( 0.0001, (float) $visible_height );
+
+		return array(
+			'visible_width'        => $visible_width,
+			'visible_height'       => $visible_height,
+			'is_puzzle'            => (bool) $is_puzzle,
+			'puzzle_cols'          => $is_puzzle ? max( 1, (int) $default_puzzle_cols ) : 0,
+			'puzzle_rows'          => $is_puzzle ? max( 1, (int) $default_puzzle_rows ) : 0,
+			'visible_aspect_ratio' => $visible_height > 0 ? $visible_width / $visible_height : 1,
+		);
+	}
+
+	private static function get_oriented_spec_for_thumbnail( $spec, $url, $crop, $rotation = 0 ) {
+		if ( is_array( $crop ) && ! empty( $crop['width'] ) && ! empty( $crop['height'] ) ) {
+			$crop_w = (float) $crop['width'];
+			$crop_h = (float) $crop['height'];
+			if ( $crop_w > 0 && $crop_h > 0 ) {
+				$ratio = $crop_w / $crop_h;
+				if ( abs( (float) $spec['visible_aspect_ratio'] - 1 ) < 0.0001 ) {
+					return $spec;
+				}
+
+				$image_landscape   = $ratio >= 1;
+				$product_landscape = (float) $spec['visible_aspect_ratio'] >= 1;
+				if ( $image_landscape !== $product_landscape ) {
+					$swapped                        = $spec;
+					$swapped['visible_width']       = $spec['visible_height'];
+					$swapped['visible_height']      = $spec['visible_width'];
+					$swapped['visible_aspect_ratio']= 1 / max( 0.0001, (float) $spec['visible_aspect_ratio'] );
+
+					return $swapped;
+				}
+
+				return $spec;
+			}
+		}
+
+		$default_ratio = (float) $spec['visible_aspect_ratio'];
+		if ( abs( $default_ratio - 1 ) < 0.0001 ) {
+			return $spec;
+		}
+
+		$image_ratio = self::get_transformed_image_ratio_from_url( $url, $rotation );
+		if ( null === $image_ratio ) {
+			return $spec;
+		}
+
+		$image_landscape   = $image_ratio >= 1;
+		$product_landscape = $default_ratio >= 1;
+		if ( $image_landscape === $product_landscape ) {
+			return $spec;
+		}
+
+		$swapped                        = $spec;
+		$swapped['visible_width']       = $spec['visible_height'];
+		$swapped['visible_height']      = $spec['visible_width'];
+		$swapped['visible_aspect_ratio']= 1 / max( 0.0001, $default_ratio );
+
+		return $swapped;
+	}
+
+	private static function resolve_puzzle_grid_for_thumbnail( $spec, $crop, $url, $rotation = 0, $entry = array() ) {
+		if ( empty( $spec['is_puzzle'] ) ) {
+			return array(
+				'cols' => 0,
+				'rows' => 0,
+			);
+		}
+
+		$default_cols = max( 1, (int) $spec['puzzle_cols'] );
+		$default_rows = max( 1, (int) $spec['puzzle_rows'] );
+		$entry_cols   = isset( $entry['puzzle_cols'] ) ? max( 0, (int) $entry['puzzle_cols'] ) : 0;
+		$entry_rows   = isset( $entry['puzzle_rows'] ) ? max( 0, (int) $entry['puzzle_rows'] ) : 0;
+
+		if ( $entry_cols > 0 && $entry_rows > 0 ) {
+			return array(
+				'cols' => $entry_cols,
+				'rows' => $entry_rows,
+			);
+		}
+
+		$default_ratio = ( $default_rows > 0 && ! empty( $spec['visible_height'] ) )
+			? ( ( $default_cols * (float) $spec['visible_width'] ) / ( $default_rows * (float) $spec['visible_height'] ) )
+			: 1;
+
+		$image_ratio = null;
+		if ( is_array( $crop ) && ! empty( $crop['width'] ) && ! empty( $crop['height'] ) ) {
+			$crop_w = (float) $crop['width'];
+			$crop_h = (float) $crop['height'];
+			if ( $crop_w > 0 && $crop_h > 0 ) {
+				$image_ratio = $crop_w / $crop_h;
+			}
+		}
+
+		if ( null === $image_ratio ) {
+			$image_ratio = self::get_transformed_image_ratio_from_url( $url, $rotation );
+		}
+
+		if ( null === $image_ratio ) {
+			return array(
+				'cols' => $default_cols,
+				'rows' => $default_rows,
+			);
+		}
+
+		$image_landscape   = $image_ratio >= 1;
+		$default_landscape = $default_ratio >= 1;
+
+		if ( $image_landscape === $default_landscape ) {
+			return array(
+				'cols' => $default_cols,
+				'rows' => $default_rows,
+			);
+		}
+
+		return array(
+			'cols' => $default_rows,
+			'rows' => $default_cols,
+		);
+	}
+
+	private static function get_thumbnail_frame_aspect_ratio_static( $spec, $grid, $is_puzzle ) {
+		if ( ! $is_puzzle ) {
+			return max( 0.0001, (float) $spec['visible_aspect_ratio'] );
+		}
+
+		$cols = isset( $grid['cols'] ) ? max( 1, (int) $grid['cols'] ) : 1;
+		$rows = isset( $grid['rows'] ) ? max( 1, (int) $grid['rows'] ) : 1;
+
+		$visible_width  = isset( $spec['visible_width'] ) ? max( 0.0001, (float) $spec['visible_width'] ) : 1.0;
+		$visible_height = isset( $spec['visible_height'] ) ? max( 0.0001, (float) $spec['visible_height'] ) : 1.0;
+		$overall_width  = $visible_width * $cols;
+		$overall_height = $visible_height * $rows;
+
+		if ( $overall_width <= 0 || $overall_height <= 0 ) {
+			return max( 0.0001, (float) $spec['visible_aspect_ratio'] );
+		}
+
+		return max( 0.0001, $overall_width / $overall_height );
+	}
+
+	private static function get_entry_orientation_static( $spec, $crop, $grid ) {
+		if ( ! empty( $spec['is_puzzle'] ) ) {
+			$cols = isset( $grid['cols'] ) ? (int) $grid['cols'] : 1;
+			$rows = isset( $grid['rows'] ) ? (int) $grid['rows'] : 1;
+
+			return $cols >= $rows ? 'landscape' : 'portrait';
+		}
+
+		if ( is_array( $crop ) && ! empty( $crop['width'] ) && ! empty( $crop['height'] ) ) {
+			$crop_w = (float) $crop['width'];
+			$crop_h = (float) $crop['height'];
+			if ( $crop_w > 0 && $crop_h > 0 ) {
+				return $crop_w >= $crop_h ? 'landscape' : 'portrait';
+			}
+		}
+
+		return ! empty( $spec['visible_aspect_ratio'] ) && (float) $spec['visible_aspect_ratio'] >= 1 ? 'landscape' : 'portrait';
 	}
 
 	private function build_thumbnail_jpeg( $source_url, $crop, $max_side = 220, $puzzle_cols = 0, $puzzle_rows = 0, $rotation = 0 ) {

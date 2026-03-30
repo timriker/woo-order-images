@@ -11,6 +11,8 @@
 		const base = Math.max(1, parseInt(container.getAttribute('data-woi-required-base') || '1', 10));
 		const aspectRatio = parseFloat(container.getAttribute('data-woi-aspect-ratio') || '1');
 		const visibleAspectRatio = parseFloat(container.getAttribute('data-woi-visible-aspect-ratio') || '1');
+		const visibleWidth = parseFloat(container.getAttribute('data-woi-visible-width') || '1');
+		const visibleHeight = parseFloat(container.getAttribute('data-woi-visible-height') || '1');
 		const visibleWidthPercent = parseFloat(container.getAttribute('data-woi-visible-width-percent') || '100');
 		const visibleHeightPercent = parseFloat(container.getAttribute('data-woi-visible-height-percent') || '100');
 		const isPuzzle = container.getAttribute('data-woi-is-puzzle') === '1';
@@ -31,13 +33,14 @@
 		const modalImage = modal ? modal.querySelector('[data-woi-cropper-image]') : null;
 		const zoomSlider = modal ? modal.querySelector('[data-woi-zoom-slider]') : null;
 		const zoomValue = modal ? modal.querySelector('[data-woi-zoom-value]') : null;
+		const dpiWarning = modal ? modal.querySelector('[data-woi-dpi-warning]') : null;
 		const applyCountRow = modal ? modal.querySelector('[data-woi-apply-count-row]') : null;
 		const applyCountSelect = modal ? modal.querySelector('[data-woi-apply-count]') : null;
 		const saveCropButton = modal ? modal.querySelector('[data-woi-save-crop]') : null;
 		const closeButtons = modal ? modal.querySelectorAll('[data-woi-close]') : [];
 		const puzzleGrid = modal ? modal.querySelector('[data-woi-puzzle-grid]') : null;
 
-		if (!form || !multiFileInput || !slotsWrap || !slotTemplate || !quantityInput || !textNode || !modal || !modalImage || !saveCropButton || !orientationSwapButton || !rotateButton) {
+		if (!form || !multiFileInput || !slotsWrap || !slotTemplate || !quantityInput || !textNode || !modal || !modalImage || !saveCropButton || !orientationSwapButton || !rotateButton || !dpiWarning) {
 			return;
 		}
 
@@ -161,6 +164,85 @@
 				visibleHeightPercent: landscapeVisibleHeightPercent,
 				orientation: 'landscape',
 			};
+		};
+
+		const getTargetPrintSize = (slot, geometry) => {
+			if (isPuzzle) {
+				const cols = geometry && geometry.puzzleCols ? geometry.puzzleCols : Math.max(1, parseInt((slot && slot.puzzleCols) || puzzleCols, 10));
+				const rows = geometry && geometry.puzzleRows ? geometry.puzzleRows : Math.max(1, parseInt((slot && slot.puzzleRows) || puzzleRows, 10));
+				return {
+					width: Math.max(0.0001, visibleWidth * cols),
+					height: Math.max(0.0001, visibleHeight * rows),
+				};
+			}
+
+			if (isSquare) {
+				return {
+					width: Math.max(0.0001, visibleWidth),
+					height: Math.max(0.0001, visibleHeight),
+				};
+			}
+
+			const orientation = geometry && geometry.orientation ? geometry.orientation : ((slot && slot.orientation) || defaultOrientation);
+			if (orientation === 'portrait') {
+				return {
+					width: Math.max(0.0001, Math.min(visibleWidth, visibleHeight)),
+					height: Math.max(0.0001, Math.max(visibleWidth, visibleHeight)),
+				};
+			}
+
+			return {
+				width: Math.max(0.0001, Math.max(visibleWidth, visibleHeight)),
+				height: Math.max(0.0001, Math.min(visibleWidth, visibleHeight)),
+			};
+		};
+
+		const updateDpiWarning = (slot, cropData = null, geometry = null) => {
+			if (!dpiWarning || !slot) {
+				return;
+			}
+
+			const crop = cropData && cropData.width > 0 && cropData.height > 0 ? cropData : slot.crop;
+			if (!crop || !(crop.width > 0) || !(crop.height > 0)) {
+				dpiWarning.hidden = true;
+				dpiWarning.textContent = '';
+				dpiWarning.className = 'woi-dpi-warning';
+				return;
+			}
+
+			const printSize = getTargetPrintSize(slot, geometry);
+			const dpiX = crop.width / Math.max(0.0001, printSize.width);
+			const dpiY = crop.height / Math.max(0.0001, printSize.height);
+			const dpi = Math.round(Math.min(dpiX, dpiY));
+
+			let quality = 'excellent';
+			let label = ajaxConfig && ajaxConfig.dpiExcellentLabel ? ajaxConfig.dpiExcellentLabel : 'Excellent';
+			let help = ajaxConfig && ajaxConfig.dpiExcellentHelp ? ajaxConfig.dpiExcellentHelp : 'This crop should print very well.';
+
+			if (dpi < 150) {
+				quality = 'low';
+				label = ajaxConfig && ajaxConfig.dpiLowLabel ? ajaxConfig.dpiLowLabel : 'Low';
+				help = ajaxConfig && ajaxConfig.dpiLowHelp ? ajaxConfig.dpiLowHelp : 'This crop may print blurry. Try zooming out or using a higher-resolution image.';
+			} else if (dpi < 200) {
+				quality = 'fair';
+				label = ajaxConfig && ajaxConfig.dpiFairLabel ? ajaxConfig.dpiFairLabel : 'Fair';
+				help = ajaxConfig && ajaxConfig.dpiFairHelp ? ajaxConfig.dpiFairHelp : 'This crop is usable, but a higher-resolution image may print better.';
+			} else if (dpi < 300) {
+				quality = 'good';
+				label = ajaxConfig && ajaxConfig.dpiGoodLabel ? ajaxConfig.dpiGoodLabel : 'Good';
+				help = ajaxConfig && ajaxConfig.dpiGoodHelp ? ajaxConfig.dpiGoodHelp : 'This crop should print well.';
+			}
+
+			const template = ajaxConfig && ajaxConfig.dpiWarningTemplate
+				? ajaxConfig.dpiWarningTemplate
+				: 'Estimated print quality: %1$s (%2$d DPI). %3$s';
+
+			dpiWarning.textContent = template
+				.replace('%1$s', label)
+				.replace('%2$d', `${dpi}`)
+				.replace('%3$s', help);
+			dpiWarning.className = `woi-dpi-warning woi-dpi-warning--${quality}`;
+			dpiWarning.hidden = false;
 		};
 
 		const applyModalGuides = (geometry) => {
@@ -485,6 +567,8 @@
 				wheelZoomRatio: 0.06,
 				crop() {
 					syncPuzzleGridToCropBox();
+					const cropData = this.cropper ? this.cropper.getData(true) : null;
+					updateDpiWarning(slot, cropData, state.cropGeometry);
 				},
 				zoom(event) {
 					const ratio = typeof event.detail === 'object' ? event.detail.ratio : null;
@@ -557,6 +641,7 @@
 
 						syncSliderFromCropper();
 						syncPuzzleGridToCropBox();
+						updateDpiWarning(slot, cropper.getData(true), state.cropGeometry);
 					};
 
 					requestAnimationFrame(() => requestAnimationFrame(applyZoomBounds));
@@ -586,6 +671,9 @@
 				puzzleGrid.style.width = '';
 				puzzleGrid.style.height = '';
 			}
+			dpiWarning.hidden = true;
+			dpiWarning.textContent = '';
+			dpiWarning.className = 'woi-dpi-warning';
 		};
 
 		const renderSlots = () => {
