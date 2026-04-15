@@ -4,6 +4,12 @@ All notable changes to `woo-order-images` will be documented in this file.
 
 This project follows a pragmatic release history rather than a strict changelog format for older versions. Recent releases are documented in more detail.
 
+## [0.7.5] - 2026-04-15
+
+### Added
+- PDF Invoices & Packing Slips for WooCommerce integration: WOI customer-uploaded images now appear as inline thumbnails on invoices and packing slips. Thumbnails are embedded as base64 JPEG data URIs so the PDF renderer never makes an HTTP request, making it compatible with both admin-triggered PDFs and automated order-status emails.
+- Added a `Plugin URI` header for Woo Order Images, pointing to the GitHub project page so admin plugin lists (including WooCommerce status reports) can show a direct project link.
+
 ## [0.7.4] - 2026-03-29
 
 ### Fixed

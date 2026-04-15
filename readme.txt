@@ -4,7 +4,7 @@ Tags: woocommerce, product images, image upload, printing, puzzle
 Requires at least: 6.8
 Tested up to: 6.9.4
 Requires PHP: 7.4
-Stable tag: 0.7.4
+Stable tag: 0.7.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -23,6 +23,7 @@ Key capabilities include:
 * Order-level print-sheet generation
 * Puzzle layouts with portrait and landscape grid support
 * Global print bleed, margins, watermark text, and page size settings
+* Optional integration with PDF Invoices & Packing Slips for WooCommerce (by WP Overnight) — customer-uploaded images appear as inline thumbnails on invoices and packing slips
 
 == Installation ==
 
@@ -69,6 +70,10 @@ This plugin bundles the following third-party library:
   * https://github.com/YahnisElsts/plugin-update-checker
 
 == Changelog ==
+
+= 0.7.5 =
+* Added integration with PDF Invoices & Packing Slips for WooCommerce (by WP Overnight): customer-uploaded images now appear as inline thumbnails on invoices and packing slips. Thumbnails are embedded as JPEG data URIs so the PDF renderer makes no HTTP requests, making it compatible with both admin-triggered and automated email PDFs.
+* Added a `Plugin URI` header pointing to the GitHub project so admin plugin lists (including WooCommerce status reports) can link WOI to its project page.
 
 = 0.7.4 =
 * Fixed the GitHub release workflow to build from the exact pushed ref and to fail if a pushed tag version does not match the plugin version in the checked-out files.

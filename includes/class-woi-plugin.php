@@ -9,6 +9,7 @@ require_once WOI_PLUGIN_DIR . 'includes/class-woi-admin-order-images.php';
 require_once WOI_PLUGIN_DIR . 'includes/class-woi-frontend.php';
 require_once WOI_PLUGIN_DIR . 'includes/class-woi-order-images.php';
 require_once WOI_PLUGIN_DIR . 'includes/class-woi-settings.php';
+require_once WOI_PLUGIN_DIR . 'includes/class-woi-pdf-invoices.php';
 
 class WOI_Plugin {
 	private static $instance = null;
@@ -36,5 +37,8 @@ class WOI_Plugin {
 
 		$admin_order_images = new WOI_Admin_Order_Images();
 		$admin_order_images->init();
+
+		$pdf_invoices = new WOI_PDF_Invoices();
+		$pdf_invoices->init();
 	}
 }

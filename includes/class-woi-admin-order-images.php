@@ -1752,4 +1752,99 @@ class WOI_Admin_Order_Images {
 			imagecopyresampled( $tile_img, $tile_img, $copy_right, 0, $copy_right - 1, 0, $full_w - $copy_right, $full_h, 1, $full_h );
 		}
 	}
+
+	/**
+	 * Generate a base64-encoded JPEG data URI of the cropped WOI image for embedding in PDF documents.
+	 *
+	 * Uses the item's stored spec (visible dimensions, puzzle config) and image entry (URL, crop, rotation)
+	 * to produce a small thumbnail suitable for mPDF/Dompdf without any HTTP requests.
+	 *
+	 * @param WC_Order_Item_Product $wc_item     The order line-item.
+	 * @param array                 $image_entry Single entry from the _woi_images meta array.
+	 * @param int                   $thumb_px    Maximum dimension (px) of the output thumbnail.
+	 * @return string  Data URI string, or empty string on failure.
+	 */
+	public static function generate_pdf_thumbnail_data_uri( $wc_item, $image_entry, $thumb_px = 120 ) {
+		$instance = new self();
+
+		$url      = isset( $image_entry['url'] ) ? (string) $image_entry['url'] : '';
+		$crop     = isset( $image_entry['crop'] ) && is_array( $image_entry['crop'] ) ? $image_entry['crop'] : array();
+		$rotation = isset( $image_entry['rotation'] ) ? WOI_Order_Images::normalize_rotation_value( $image_entry['rotation'] ) : 0;
+
+		if ( '' === $url ) {
+			return '';
+		}
+
+		$base_spec = $instance->get_item_spec( $wc_item );
+
+		// Build a no-bleed spec for thumbnail rendering so the output contains only the
+		// visible area without wrap-margin strips, which look odd at small sizes.
+		$thumb_spec                        = $base_spec;
+		$thumb_spec['wrap_margin']         = 0.0;
+		$thumb_spec['full_width']          = $base_spec['visible_width'];
+		$thumb_spec['full_height']         = $base_spec['visible_height'];
+		$thumb_spec['visible_width_percent']  = 100.0;
+		$thumb_spec['visible_height_percent'] = 100.0;
+
+		if ( ! empty( $base_spec['is_puzzle'] ) ) {
+			// For puzzle items, show the full assembled image rather than individual tiles.
+			$cols = max( 1, (int) $base_spec['puzzle_cols'] );
+			$rows = max( 1, (int) $base_spec['puzzle_rows'] );
+			$entry_cols = isset( $image_entry['puzzle_cols'] ) ? max( 0, (int) $image_entry['puzzle_cols'] ) : 0;
+			$entry_rows = isset( $image_entry['puzzle_rows'] ) ? max( 0, (int) $image_entry['puzzle_rows'] ) : 0;
+			if ( $entry_cols > 0 && $entry_rows > 0 ) {
+				$cols = $entry_cols;
+				$rows = $entry_rows;
+			}
+			$thumb_spec['visible_width']        = $base_spec['visible_width'] * $cols;
+			$thumb_spec['visible_height']       = $base_spec['visible_height'] * $rows;
+			$thumb_spec['full_width']           = $thumb_spec['visible_width'];
+			$thumb_spec['full_height']          = $thumb_spec['visible_height'];
+			$thumb_spec['visible_aspect_ratio'] = $thumb_spec['visible_height'] > 0
+				? $thumb_spec['visible_width'] / $thumb_spec['visible_height']
+				: 1.0;
+		} else {
+			$thumb_spec = $instance->get_oriented_spec_for_crop( $thumb_spec, $url, $crop, $rotation );
+		}
+
+		$jpeg = $instance->build_single_tile_jpeg( $url, $crop, $thumb_spec, $rotation );
+		if ( empty( $jpeg ) ) {
+			return '';
+		}
+
+		// Downsample to thumbnail dimensions so the PDF stays compact.
+		$src = @imagecreatefromstring( $jpeg );
+		if ( ! $src ) {
+			return '';
+		}
+
+		$sw    = imagesx( $src );
+		$sh    = imagesy( $src );
+		$scale = min( 1.0, (float) $thumb_px / max( 1, max( $sw, $sh ) ) );
+		$tw    = max( 1, (int) round( $sw * $scale ) );
+		$th    = max( 1, (int) round( $sh * $scale ) );
+
+		$thumb = imagecreatetruecolor( $tw, $th );
+		if ( ! $thumb ) {
+			imagedestroy( $src );
+			return '';
+		}
+
+		$white = imagecolorallocate( $thumb, 255, 255, 255 );
+		imagefill( $thumb, 0, 0, $white );
+		imagecopyresampled( $thumb, $src, 0, 0, 0, 0, $tw, $th, $sw, $sh );
+		imagedestroy( $src );
+
+		ob_start();
+		imagejpeg( $thumb, null, 85 );
+		$thumb_jpeg = ob_get_clean();
+		imagedestroy( $thumb );
+
+		if ( empty( $thumb_jpeg ) ) {
+			return '';
+		}
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
+		return 'data:image/jpeg;base64,' . base64_encode( $thumb_jpeg );
+	}
 }
